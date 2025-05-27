@@ -7,8 +7,8 @@ import matplotlib.pyplot as plt
 from sklearn.isotonic import IsotonicRegression
 from scipy.interpolate import PchipInterpolator
 
-from src.utils.file_utils import load_file_with_string
-from .config import Config
+from utils.file_utils import load_file_with_string
+from config import Config
 from itertools import zip_longest   # handles uneven list lengths
 from collections.abc import Iterable
 from itertools import product

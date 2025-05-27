@@ -1,21 +1,17 @@
+# src/events_handler.py
+
+import time
 import pytz
 from datetime import datetime, timedelta, timezone
+
 from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.triggers.cron import CronTrigger
-from apscheduler.triggers.date import DateTrigger
+from apscheduler.triggers.cron     import CronTrigger
+from apscheduler.triggers.date     import DateTrigger
 from apscheduler.triggers.interval import IntervalTrigger
-import logging
 
-from config          import Config
-from event_fetcher   import EventFetcher
-from odds_processor  import process_odds_for_event
-
-logging.basicConfig(
-    level=logging.INFO,
-    format='[%(asctime)s] %(levelname)s: %(message)s',
-    datefmt='%Y-%m-%dT%H:%M:%S%z'
-)
-logger = logging.getLogger(__name__)
+from config            import Config
+from event_fetcher     import EventFetcher
+from odds_processor    import OddsProcessor
 
 class EventsHandler:
     def __init__(
@@ -23,17 +19,21 @@ class EventsHandler:
         p_gap: float,
         ev_thresh: float,
         bootstrap: bool = False,
-        player: bool = True,
-        game: bool = False,
-        regions=Config.US,
-        mode: str = "live",
-        filepath: str = "./odds_data",
+        arb_thresh: float = 0.01,
+        player:    bool  = True,
+        game:      bool  = False,
+        regions           = Config.US,
+        mode:      str   = "live",
+        filepath:  str   = "./odds_data",
         interval_minutes: int = 5,
     ):
         self.fetcher    = EventFetcher()
         self.scheduler  = BackgroundScheduler(timezone=pytz.UTC)
+
+        # store your thresholds & flags
         self.p_gap      = p_gap
         self.ev_thresh  = ev_thresh
+        self.arb_thresh = arb_thresh
         self.bootstrap  = bootstrap
         self.player     = player
         self.game       = game
@@ -42,62 +42,57 @@ class EventsHandler:
         self.filepath   = filepath
         self.interval   = interval_minutes
 
-        # 1) Schedule a daily job at midnight UTC to refresh today's events
+        # 1) daily at midnight UTC, refresh & schedule
         self.scheduler.add_job(
-            self.schedule_todays_events,
+            self._schedule_all_events,
             CronTrigger(hour=0, minute=0),
             id="daily_event_refresh"
         )
 
-        # 2) Run once immediately on startup
-        self.schedule_todays_events()
+        # 2) run once now
+        self._schedule_all_events()
 
-        # 3) Start the background scheduler
+        # 3) start the scheduler
         self.scheduler.start()
         print("[EventsHandler] Scheduler started.")
 
-    def schedule_todays_events(self):
+    def _schedule_all_events(self):
         now = datetime.now(timezone.utc)
-        print(f"[{now.isoformat()}] Scheduling today's events…")
-        events = self.fetcher.get_todays_events()
+        print(f"[{now.isoformat()}] Refreshing & scheduling today's events…")
+        events = self.fetcher.get_events_between_hours(6, 24)
         for evt in events:
-            self._schedule_event_jobs(evt)
+            self._schedule_event(evt)
 
-    def _schedule_event_jobs(self, event: dict):
-        """
-        For a single event dict, schedule:
-          - A one‐time run at T_start – 15m
-          - An interval run every self.interval minutes from T_start + 15m until T_start + 4h
-        """
-        event_id   = event["id"]
-        name       = f"{event['home_team']} vs {event['away_team']}"
-        commence   = datetime.fromisoformat(event["commence_time"])
-        now        = datetime.now(timezone.utc)
+    def _schedule_event(self, event: dict):
+        eid      = event["id"]
+        name     = f"{event['home_team']} vs {event['away_team']}"
+        commence = datetime.fromisoformat(event["commence_time"])
+        now      = datetime.now(timezone.utc)
 
         t_pre      = commence - timedelta(minutes=15)
         t_interval = commence + timedelta(minutes=15)
         t_end      = commence + timedelta(hours=4)
 
-        pre_job_id = f"pre_{event_id}"
-        int_job_id = f"int_{event_id}"
+        pre_id = f"pre_{eid}"
+        int_id = f"int_{eid}"
 
-        # Remove any existing jobs for this event
-        for jid in (pre_job_id, int_job_id):
+        # clear any old jobs
+        for jid in (pre_id, int_id):
             if self.scheduler.get_job(jid):
                 self.scheduler.remove_job(jid)
 
-        # Schedule the pre-game check
+        # 1-time, 15m before
         if t_pre > now:
             self.scheduler.add_job(
                 self._run_event,
                 trigger=DateTrigger(run_date=t_pre),
                 args=[event],
-                id=pre_job_id,
+                id=pre_id,
                 max_instances=1,
             )
-            print(f"[{name}] Scheduled pre-game check at {t_pre.isoformat()}")
+            print(f"[{name}] scheduled pre-game @ {t_pre.isoformat()}")
 
-        # Schedule the recurring post-start checks
+        # interval from +15m → +4h
         if t_interval < t_end:
             start_date = max(t_interval, now)
             self.scheduler.add_job(
@@ -108,23 +103,30 @@ class EventsHandler:
                     end_date=t_end
                 ),
                 args=[event],
-                id=int_job_id,
+                id=int_id,
                 max_instances=1,
             )
             print(
-                f"[{name}] Scheduled interval checks every {self.interval}m "
+                f"[{name}] scheduled every {self.interval}m "
                 f"from {start_date.isoformat()} to {t_end.isoformat()}"
             )
 
     def _run_event(self, event: dict):
-        """
-        Wrapper to call your odds-processor with the stored parameters.
-        """
-        now  = datetime.now(timezone.utc).isoformat()
+        ts   = datetime.now(timezone.utc).isoformat()
         name = f"{event['home_team']} vs {event['away_team']}"
-        print(f"[{now}] Running processor for {name}")
+        print(f"[{ts}] ▶ Running processor for {name}")
+
+        # Correctly pass `event` as first arg to OddsProcessor
+        proc = OddsProcessor(
+            event,
+            arb_thresh=self.arb_thresh,
+            p_gap=self.p_gap,
+            ev_thresh=self.ev_thresh,
+            bootstrap=self.bootstrap
+        )
+
         try:
-            process_odds_for_event(
+            proc.process_odds_for_event(
                 event,
                 self.p_gap,
                 self.ev_thresh,
@@ -134,7 +136,31 @@ class EventsHandler:
                 regions=self.regions,
                 mode=self.mode,
                 filepath=self.filepath,
-                verbose=False
+                verbose=True
             )
         except Exception as err:
-            print(f"[{name}] Error during processing: {err}")
+            print(f"[{name}] ERROR during processing → {err}")
+
+
+if __name__ == "__main__":
+    # instantiate with your desired params
+    handler = EventsHandler(
+        p_gap=0.075,
+        ev_thresh=0.10,
+        bootstrap=False,
+        arb_thresh=0.01,
+        player=True,
+        game=True,
+        regions=Config.US,
+        mode="live",
+        filepath="./odds_data",
+        interval_minutes=5,
+    )
+
+    try:
+        # keep the process alive so the scheduler can run
+        while True:
+            time.sleep(60)
+    except (KeyboardInterrupt, SystemExit):
+        handler.scheduler.shutdown()
+        print("Scheduler stopped.")

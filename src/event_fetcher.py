@@ -1,7 +1,7 @@
 import pandas as pd
 import requests
 from datetime import datetime, timezone, timedelta
-from .config import Config
+from config import Config
 
 class EventFetcher:
     """Fetch today’s events (and later, props) from the Odds API."""

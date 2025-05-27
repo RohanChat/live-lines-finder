@@ -1,4 +1,8 @@
 .env
 # ignore the odds_data directory
 odds_data/
-src/pycache/
+src/__pycache__/
+src/utils/__pycache__/
+# Python byte-code
+__pycache__/
+*.pyc
