@@ -1,3 +1,4 @@
 .env
 # ignore the odds_data directory
 odds_data/
+src/pycache/

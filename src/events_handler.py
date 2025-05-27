@@ -1,83 +1,140 @@
-import threading
-import time
+import pytz
 from datetime import datetime, timedelta, timezone
-from .config import Config
-from .event_fetcher import EventFetcher
-from .odds_processor import process_odds_for_event, run_props_for_duration
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.date import DateTrigger
+from apscheduler.triggers.interval import IntervalTrigger
+import logging
+
+from config          import Config
+from event_fetcher   import EventFetcher
+from odds_processor  import process_odds_for_event
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='[%(asctime)s] %(levelname)s: %(message)s',
+    datefmt='%Y-%m-%dT%H:%M:%S%z'
+)
+logger = logging.getLogger(__name__)
 
 class EventsHandler:
-    def __init__(self, event_queue):
-        self.event_queue = event_queue
+    def __init__(
+        self,
+        p_gap: float,
+        ev_thresh: float,
+        bootstrap: bool = False,
+        player: bool = True,
+        game: bool = False,
+        regions=Config.US,
+        mode: str = "live",
+        filepath: str = "./odds_data",
+        interval_minutes: int = 5,
+    ):
+        self.fetcher    = EventFetcher()
+        self.scheduler  = BackgroundScheduler(timezone=pytz.UTC)
+        self.p_gap      = p_gap
+        self.ev_thresh  = ev_thresh
+        self.bootstrap  = bootstrap
+        self.player     = player
+        self.game       = game
+        self.regions    = regions
+        self.mode       = mode
+        self.filepath   = filepath
+        self.interval   = interval_minutes
 
-    # Placeholder for the repeated listener logic
-    def iterative_props_listener(self, event, markets, key="player", region=Config.US, interval_seconds=15):
-        event_name = f"{event['home_team']} vs. {event['away_team']}"
-        print(f"[{event_name}] Starting iterative listener at {datetime.now(timezone.utc)}")
-        
-        try:
-            while True:
-                print(f"[{event_name}] Polling at {datetime.now(timezone.utc)}")
-                # Replace this with your actual logic:
-                # start_props_listener(events=[event], markets=markets, ...)
-                time.sleep(interval_seconds)
-        except Exception as e:
-            print(f"[{event_name}] Listener stopped with error: {e}")
-
-    # Handles full lifecycle for one event
-    def handle_event_schedule(event, player=True, game_period=False, alternate=False, game=False, key="player_all", region=Config.US, interval_seconds=60):
-        event_name = f"{event['home_team']} vs. {event['away_team']}"
-        commence_time = datetime.fromisoformat(event["commence_time"])
-
-        # Step 0: Now
-        print("Conducting quick inital odds check")
-        try:
-            process_odds_for_event(event, player=True, game_period=False,
-                                alternate=False, game=False)
-        except Exception as e:
-            print(f"[{event['home_team']} vs {event['away_team']}] "
-                f"initial check failed → {e}")
-
-        # Step 1: 15 minutes BEFORE
-        time_to_15_before = (commence_time - timedelta(minutes=15)) - datetime.now(timezone.utc)
-        if time_to_15_before.total_seconds() > 0:
-            print(f"[{event_name}] Sleeping until 15 minutes before start ({time_to_15_before.total_seconds()}s)")
-            time.sleep(time_to_15_before.total_seconds())
-        try:
-            print(f"[{event_name}] It's now 15 mins before the game. Checking odds.")
-            process_odds_for_event(event, player=True, game_period=False, alternate=False, game=False)
-        except Exception as e:
-            print(f"[{event_name}] Error during pre-game odds check: {e}")
-
-
-        # Step 2: At commence time
-        time_to_commence = (commence_time - datetime.now(timezone.utc))
-        if time_to_commence.total_seconds() > 0:
-            print(f"[{event_name}] Sleeping until commence time ({time_to_commence.total_seconds()}s)")
-            time.sleep(time_to_commence.total_seconds())
-        try:
-            print(f"[{event_name}] It's now game time. Conducting odds check.")
-            process_odds_for_event(event, player=True, game_period=False, alternate=False, game=False)
-        except Exception as e:
-            print(f"[{event_name}] Error during commence-time odds check: {e}")
-
-
-
-        # Step 3: 15 minutes AFTER
-        time_to_post_commence = (commence_time + timedelta(minutes=15)) - datetime.now(timezone.utc)
-        if time_to_post_commence.total_seconds() > 0:
-            print(f"[{event_name}] Sleeping until 15 mins after start ({time_to_post_commence.total_seconds()}s)")
-            time.sleep(time_to_post_commence.total_seconds())
-        
-        print(f"[{event_name}] Starting 3.5 hour prop checker in background thread.")
-        duration_thread = threading.Thread(
-            target=run_props_for_duration,
-            args=(event,),
-            kwargs={"duration_minutes": 210, "interval_minutes": 5, "player": player, "game_period": game_period, "alternate": alternate, "game": game}
+        # 1) Schedule a daily job at midnight UTC to refresh today's events
+        self.scheduler.add_job(
+            self.schedule_todays_events,
+            CronTrigger(hour=0, minute=0),
+            id="daily_event_refresh"
         )
-        duration_thread.start()
 
-    # Launch all event threads
-    def launch_event_listeners(self, events_df, player_bool=True, game_period_bool=False, alternate_bool=False, game_bool=False):
-        for _, event in events_df.iterrows():
-            thread = threading.Thread(target=self.handle_event_schedule, args=(event,), kwargs={"player": player_bool, "game_period": game_period_bool, "alternate": alternate_bool, "game": game_bool})
-            thread.start()
+        # 2) Run once immediately on startup
+        self.schedule_todays_events()
+
+        # 3) Start the background scheduler
+        self.scheduler.start()
+        print("[EventsHandler] Scheduler started.")
+
+    def schedule_todays_events(self):
+        now = datetime.now(timezone.utc)
+        print(f"[{now.isoformat()}] Scheduling today's events…")
+        events = self.fetcher.get_todays_events()
+        for evt in events:
+            self._schedule_event_jobs(evt)
+
+    def _schedule_event_jobs(self, event: dict):
+        """
+        For a single event dict, schedule:
+          - A one‐time run at T_start – 15m
+          - An interval run every self.interval minutes from T_start + 15m until T_start + 4h
+        """
+        event_id   = event["id"]
+        name       = f"{event['home_team']} vs {event['away_team']}"
+        commence   = datetime.fromisoformat(event["commence_time"])
+        now        = datetime.now(timezone.utc)
+
+        t_pre      = commence - timedelta(minutes=15)
+        t_interval = commence + timedelta(minutes=15)
+        t_end      = commence + timedelta(hours=4)
+
+        pre_job_id = f"pre_{event_id}"
+        int_job_id = f"int_{event_id}"
+
+        # Remove any existing jobs for this event
+        for jid in (pre_job_id, int_job_id):
+            if self.scheduler.get_job(jid):
+                self.scheduler.remove_job(jid)
+
+        # Schedule the pre-game check
+        if t_pre > now:
+            self.scheduler.add_job(
+                self._run_event,
+                trigger=DateTrigger(run_date=t_pre),
+                args=[event],
+                id=pre_job_id,
+                max_instances=1,
+            )
+            print(f"[{name}] Scheduled pre-game check at {t_pre.isoformat()}")
+
+        # Schedule the recurring post-start checks
+        if t_interval < t_end:
+            start_date = max(t_interval, now)
+            self.scheduler.add_job(
+                self._run_event,
+                trigger=IntervalTrigger(
+                    minutes=self.interval,
+                    start_date=start_date,
+                    end_date=t_end
+                ),
+                args=[event],
+                id=int_job_id,
+                max_instances=1,
+            )
+            print(
+                f"[{name}] Scheduled interval checks every {self.interval}m "
+                f"from {start_date.isoformat()} to {t_end.isoformat()}"
+            )
+
+    def _run_event(self, event: dict):
+        """
+        Wrapper to call your odds-processor with the stored parameters.
+        """
+        now  = datetime.now(timezone.utc).isoformat()
+        name = f"{event['home_team']} vs {event['away_team']}"
+        print(f"[{now}] Running processor for {name}")
+        try:
+            process_odds_for_event(
+                event,
+                self.p_gap,
+                self.ev_thresh,
+                bootstrap=self.bootstrap,
+                player=self.player,
+                game=self.game,
+                regions=self.regions,
+                mode=self.mode,
+                filepath=self.filepath,
+                verbose=False
+            )
+        except Exception as err:
+            print(f"[{name}] Error during processing: {err}")
