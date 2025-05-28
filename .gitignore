@@ -6,3 +6,4 @@ src/utils/__pycache__/
 # Python byte-code
 __pycache__/
 *.pyc
+*.DS_Store

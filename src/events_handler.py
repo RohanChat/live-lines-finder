@@ -1,6 +1,7 @@
 # src/events_handler.py
 
 import time
+import pandas as pd
 import pytz
 from datetime import datetime, timedelta, timezone
 
@@ -27,6 +28,9 @@ class EventsHandler:
         filepath:  str   = "./odds_data",
         interval_minutes: int = 5,
     ):
+        pd.set_option("display.max_columns", None)  # Show all columns
+        pd.set_option("display.width", None)        # Use full terminal width
+        pd.set_option("display.expand_frame_repr", False)  # Don't wrap rows across lines
         self.fetcher    = EventFetcher()
         self.scheduler  = BackgroundScheduler(timezone=pytz.UTC)
 
@@ -51,6 +55,10 @@ class EventsHandler:
 
         # 2) run once now
         self._schedule_all_events()
+        # 2a) initial check right on launch: process odds immediately for today's events
+        print("[EventsHandler] Running initial check for today's events…")
+        for evt in self.fetcher.get_events_between_hours(6, 24):
+            self._run_event(evt)
 
         # 3) start the scheduler
         self.scheduler.start()
@@ -145,14 +153,14 @@ class EventsHandler:
 if __name__ == "__main__":
     # instantiate with your desired params
     handler = EventsHandler(
-        p_gap=0.075,
+        p_gap=0.1,
         ev_thresh=0.10,
         bootstrap=False,
         arb_thresh=0.01,
         player=True,
         game=True,
         regions=Config.US,
-        mode="live",
+        mode="test",
         filepath="./odds_data",
         interval_minutes=5,
     )

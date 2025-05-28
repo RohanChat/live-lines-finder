@@ -12,6 +12,7 @@ from config import Config
 from itertools import zip_longest   # handles uneven list lengths
 from collections.abc import Iterable
 from itertools import product
+from event_fetcher import EventFetcher
 
 class OddsProcessor:
     """Process and plot prop markets for an event"""
@@ -22,6 +23,7 @@ class OddsProcessor:
         self.p_gap     = p_gap
         self.ev_thresh = ev_thresh
         self.bootstrap = bootstrap
+        self.event_fetcher = EventFetcher()
 
 
 
@@ -202,14 +204,14 @@ class OddsProcessor:
 
     def implied_probability(self, decimal_odds):
         """Convert Decimal odds to implied probability."""
-        return 1 / self.decimal_odds
+        return 1 / decimal_odds
 
     def american_to_decimal(self, american_odds):
         """Convert American odds to Decimal odds."""
-        if self.american_odds < 0:
-            return (100 / abs(self.american_odds)) + 1
+        if american_odds < 0:
+            return (100 / abs(american_odds)) + 1
         else:
-            return (self.american_odds / 100) + 1
+            return (american_odds / 100) + 1
         
     def decimal_to_american(self, decimal_odds):
         if decimal_odds >= 2:
@@ -289,21 +291,15 @@ class OddsProcessor:
 
     def calculate_vig_and_no_vig(self, arranged_df, mode="under_over"):
         """
-        Calculate the vig and no-vig probabilities for each row in the DataFrame.
-        
-        Parameters
-        ----------
-        arranged_df : DataFrame
-            The DataFrame containing the prop market data.
-        mode : str, optional
-            The mode of calculation, either "under_over" or "other". Default is "under_over".
-        
-        Returns
-        -------
-        DataFrame
-            A DataFrame with additional columns for implied probabilities and vig.
+        Calculate the vig and vig‐free implied probabilities
+        for each row in arranged_df.
         """
-        arranged_df[["implied_probability", "vig"]] = arranged_df.apply(self.calculate_vig_for_row, axis=1)
+        # apply with the correct mode
+        arranged_df[["implied_probability","vig"]] = arranged_df.apply(
+            lambda row: self.calculate_vig_for_row(row, mode=mode),
+            axis=1
+        )
+        return arranged_df
 
     def calculate_arbitrage_for_row(self, row, arb_threshold=0.02):
         # Input:
@@ -395,6 +391,76 @@ class OddsProcessor:
                 "index_of_best_over": overs.index(best_over_data),
                 "index_of_best_under": unders.index(best_under_data)
             })
+        
+    def add_expected_probabilities(self, df: pd.DataFrame, mode="player") -> pd.DataFrame:
+        """
+        Robust version that works even when `outcome_name` and
+        `implied_probability` lists have different lengths.
+
+        Returns the original DataFrame with a new column 'exp_prob'
+        (list parallel to outcome_name).
+        """
+        records = []          # tidy rows to fit on
+        sub_idx = []          # position of quote within its original row
+
+        for idx, row in df.iterrows():
+            names = row.get("outcome_name", [])
+            probs = row.get("implied_probability", [])
+            pts   = row.get("outcome_point", [])   # ← this is your list of signed points
+
+            raw_pts = row.get("outcome_point", [])
+            if isinstance(raw_pts, list):
+                pts = raw_pts
+            else:
+                # broadcast scalar → list for player (or any) mode
+                pts = [raw_pts] * max(len(names), len(probs))
+
+            # Ensure we have real lists
+            if not (isinstance(names, list) and isinstance(probs, list) and isinstance(pts, list)):
+                continue
+
+            # explode side ↔ prob ↔ signed-point together
+            for j, (side, prob, pt) in enumerate(zip(names, probs, pts)):
+                if pd.isna(prob) or pd.isna(pt):
+                    continue
+                records.append({
+                    "orig_index":          idx,
+                    "sub_idx":             j,
+                    "side":                side,
+                    "prob":                float(prob),
+                    "outcome_point":       float(pt),               # ← now includes ±spread
+                    "outcome_description": row["outcome_description"],
+                    "market_key":          row["market_key"],
+                })
+
+
+        if not records:                       # nothing to process
+            df["exp_prob"] = [[] for _ in df.index]
+            return df
+
+        tidy = pd.DataFrame.from_records(records)
+
+        # ---- fit & add expected probabilities ----
+        if mode == "game":
+            # group all of a given game‐level market together
+            key_cols = ["market_key"]
+        else:
+            # for player props we still split by description + market
+            key_cols = ["outcome_description", "market_key"]
+        tidy = (
+            tidy
+            .groupby(key_cols, group_keys=False)
+            .apply(lambda group: self._add_exp_prob_to_group(group, mode=mode))
+        )
+
+        # ---- collect back into list per original row ----
+        tidy_sorted = tidy.sort_values(["orig_index", "sub_idx"])
+        exp_dict    = tidy_sorted.groupby("orig_index")["exp_prob"].apply(list).to_dict()
+
+        df = df.copy()
+        df["exp_prob"] = [exp_dict.get(i, []) for i in df.index]
+
+        return df
 
     def calculate_ev(self, df):
         """
@@ -505,6 +571,57 @@ class OddsProcessor:
             merged_rows.append(row)
         
         return pd.DataFrame(merged_rows)
+    
+    def _fit_monotone_cdf(self, x, y):
+        """Return a callable CDF fitted with Isotonic → PCHIP smoothing."""
+        iso = IsotonicRegression(out_of_bounds="clip").fit(x, y)
+        y_iso = iso.predict(x)
+        return PchipInterpolator(x, y_iso, extrapolate=True)  # CDF(x)
+
+    def _row_exp_prob(self, point, side, cdf):
+        """Fair P(Over) / P(Under) given the fitted CDF."""
+        p_cdf = float(cdf(point))
+        return 1.0 - p_cdf if side.lower() == "over" else p_cdf
+
+    def _add_exp_prob_to_group(self, group: pd.DataFrame, mode="game") -> pd.DataFrame:
+        # 1) if it’s a moneyline, just copy each bookie's own implied probability
+        if group["market_key"].iat[0] == "h2h":
+            avg = group.groupby("side", as_index=False)["prob"].mean()
+            # map that back onto each row
+            out = group.copy()
+            out["exp_prob"] = out["side"].map(avg.set_index("side")["prob"])
+            return out
+
+        # 2) otherwise—spread, totals, etc.—do your normal CDF‐fitting…
+        pts   = group["outcome_point"].astype(float).to_numpy()
+        probs = group["prob"].astype(float).to_numpy()
+        raw   = group["side"].str.lower().to_numpy()
+
+        side = np.where(
+            np.isin(raw, ["under", "over"]),
+            raw,
+            np.where(pts < 0, "over", "under")
+        )
+
+        y_cdf = np.where(side == "under", probs, 1.0 - probs)
+
+        df_tmp   = (pd.DataFrame({"x": pts, "y": y_cdf})
+                    .groupby("x", sort=True, as_index=False)
+                    .mean()
+                    .sort_values("x"))
+        x_unique = df_tmp["x"].to_numpy()
+        y_unique = df_tmp["y"].to_numpy()
+
+        if len(x_unique) >= 2:
+            cdf = self._fit_monotone_cdf(x_unique, y_unique)
+            exp = [self._row_exp_prob(pt, sd, cdf) for pt, sd in zip(pts, side)]
+        else:
+            single_p = float(y_unique[0])
+            exp = [single_p if s == "under" else 1.0 - single_p for s in side]
+
+        out = group.copy()
+        out["exp_prob"] = exp
+        return out
 
     def find_player_arbs(self, df, threshold=0.01):
         # if 'side' not in df.columns or df.empty:
@@ -796,6 +913,64 @@ class OddsProcessor:
 
         return pd.DataFrame(arb_list)
     
+    def get_mispriced_flattened(self, flagged_df: pd.DataFrame,
+                            description: str | None = None,
+                            market_key: str | None = None) -> pd.DataFrame:
+        """
+        Flatten only quotes with mispriced == True, keeping:
+            prob_mkt  : vig‑free market probability
+            prob_fit  : fitted fair probability
+            edge_pct  : ROI %
+        """
+        if "mispriced" not in flagged_df.columns:
+            raise ValueError("DataFrame must first pass through "
+                            "flag_mispriced_lines (missing 'mispriced').")
+
+        records = []
+
+        for _, row in flagged_df.iterrows():
+
+            # optional filters
+            if description is not None and row["outcome_description"] != description:
+                continue
+            if market_key is not None and row["market_key"] != market_key:
+                continue
+
+            # parallel lists
+            names   = row.get("outcome_name", [])
+            probs   = row.get("implied_probability", [])   # vig‑free market prob
+            books   = row.get("bookmaker_key", [])
+            odds    = row.get("outcome_price", [])
+            mtypes  = row.get("markets", [])
+            links   = row.get("link", [])
+            flags   = row.get("mispriced", [])
+            fits    = row.get("exp_prob", [])
+            edges   = row.get("ev_diff", [])
+            vigs    = row.get("vig", [])
+
+            for side, p_mkt, book, odd, mtype, link, flag, p_fit, edge, vig in zip(
+                names, probs, books, odds, mtypes, links, flags, fits, edges, vigs
+            ):
+                if not flag:                        # keep only mispriced
+                    continue
+                records.append({
+                    "outcome_description": row["outcome_description"],
+                    "market_key":          row["market_key"],
+                    "point":               row["outcome_point"],
+                    "side":                side,
+                    "prob_mkt":            p_mkt,     # no‑vig market prob
+                    "prob_fit":            p_fit,     # fitted probability
+                    "edge":            edge,      # theoretical ROI %
+                    "bookmaker":           book,
+                    "odds":                odd,
+                    "market_type":         mtype,
+                    "link":                link,
+                    "mispriced":           True,
+                    "vig":                 vig,
+                })
+
+        return pd.DataFrame(records)
+    
     def preprocess_game_props(self, game_df, alternate_df, period_df):
         if game_df.empty:
                 print(f"No game data for event {self.event['id']} – skipping.")
@@ -870,8 +1045,8 @@ class OddsProcessor:
                 print("\n")
 
             if mode == "live":
-                player_prop_df = self.get_props_for_todays_events([event], markets=Config.player_prop_markets)
-                player_alt_df = self.get_props_for_todays_events([event], markets=Config.player_alternate_markets)
+                player_prop_df = self.event_fetcher.get_props_for_todays_events([event], markets=Config.player_prop_markets)
+                player_alt_df = self.event_fetcher.get_props_for_todays_events([event], markets=Config.player_alternate_markets)
                 player_prop_df = pd.DataFrame(player_prop_df)
                 player_alt_df = pd.DataFrame(player_alt_df)
                 if not os.path.exists(f"{filepath}/player"):
@@ -960,9 +1135,12 @@ class OddsProcessor:
                 print("\n")
             
             if mode == "live":
-                game_period_df = self.get_props_for_todays_events([event], markets=Config.game_period_markets)
-                alternate_df = self.get_props_for_todays_events([event], markets=Config.alt_markets)
-                game_df = self.get_props_for_todays_events([event], markets=Config.game_markets)
+                game_period_df = self.event_fetcher.get_props_for_todays_events([event], markets=Config.game_period_markets)
+                alternate_df = self.event_fetcher.get_props_for_todays_events([event], markets=Config.alt_markets)
+                game_df = self.event_fetcher.get_props_for_todays_events([event], markets=Config.game_markets)
+                game_period_df = pd.DataFrame(game_period_df)
+                alternate_df = pd.DataFrame(alternate_df)
+                game_df = pd.DataFrame(game_df)
                 if not os.path.exists(f"{filepath}/game"):
                     os.makedirs(f"{filepath}/game")
                 # save to csv with current timestamp
