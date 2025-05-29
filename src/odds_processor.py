@@ -971,6 +971,103 @@ class OddsProcessor:
 
         return pd.DataFrame(records)
     
+    def save_market_analysis(self, mispriced_df: pd.DataFrame, merged_df_with_exp: pd.DataFrame, 
+                           event_id: str, timestamp: str, market_type: str, filepath: str = "odds_data"):
+        """
+        Save detailed market analysis for each unique market/outcome combination found in mispriced_df.
+        
+        Parameters:
+        -----------
+        mispriced_df : DataFrame with mispriced lines (flattened)
+        merged_df_with_exp : DataFrame with expected probabilities (list format)
+        event_id : str, event identifier
+        timestamp : str, timestamp for files
+        market_type : str, "player" or "game"
+        filepath : str, base filepath for saving
+        """
+        if mispriced_df.empty:
+            return
+            
+        # Create output directory
+        analysis_dir = f"{filepath}/market_analysis/{market_type}"
+        if not os.path.exists(analysis_dir):
+            os.makedirs(analysis_dir)
+        
+        # Get unique market/outcome combinations from mispriced data
+        unique_markets = mispriced_df[['outcome_description', 'market_key']].drop_duplicates()
+        
+        for _, market_row in unique_markets.iterrows():
+            desc = market_row['outcome_description']
+            mkey = market_row['market_key']
+            
+            # Find matching rows in merged_df_with_exp
+            matching_rows = merged_df_with_exp[
+                (merged_df_with_exp['outcome_description'] == desc) &
+                (merged_df_with_exp['market_key'] == mkey)
+            ]
+            
+            if matching_rows.empty:
+                continue
+                
+            # Flatten all data for this market combination
+            all_market_data = []
+            for _, row in matching_rows.iterrows():
+                # Get parallel lists
+                names = row.get("outcome_name", [])
+                probs = row.get("implied_probability", [])
+                books = row.get("bookmaker_key", [])
+                odds = row.get("outcome_price", [])
+                mtypes = row.get("markets", [])
+                links = row.get("link", [])
+                exp_probs = row.get("exp_prob", [])
+                vigs = row.get("vig", [])
+                
+                # Handle mispricing flags if they exist
+                mispriced_flags = row.get("mispriced", [])
+                if not mispriced_flags:
+                    mispriced_flags = [False] * len(names)
+                
+                # Handle edge calculations if they exist
+                edges = row.get("ev_diff", [])
+                if not edges:
+                    edges = [None] * len(names)
+                
+                # Flatten each quote
+                for i, (side, p_mkt, book, odd, mtype, link, p_fit, vig) in enumerate(zip(
+                    names, probs, books, odds, mtypes, links, exp_probs, vigs
+                )):
+                    mispriced_flag = mispriced_flags[i] if i < len(mispriced_flags) else False
+                    edge = edges[i] if i < len(edges) else None
+                    
+                    all_market_data.append({
+                        "outcome_description": desc,
+                        "market_key": mkey,
+                        "point": row["outcome_point"],
+                        "side": side,
+                        "prob_mkt": p_mkt,
+                        "prob_fit": p_fit,
+                        "edge": edge,
+                        "bookmaker": book,
+                        "odds": odd,
+                        "market_type": mtype,
+                        "link": link,
+                        "vig": vig,
+                        "mispriced": mispriced_flag,
+                    })
+            
+            if all_market_data:
+                # Create filename (sanitize special characters)
+                safe_desc = "".join(c for c in desc if c.isalnum() or c in (' ', '-', '_')).rstrip()
+                safe_mkey = "".join(c for c in mkey if c.isalnum() or c in (' ', '-', '_')).rstrip()
+                filename = f"{event_id}_{safe_desc}_{safe_mkey}_{timestamp}.csv"
+                
+                # Save to CSV
+                market_df = pd.DataFrame(all_market_data)
+                filepath_full = f"{analysis_dir}/{filename}"
+                market_df.to_csv(filepath_full, index=False)
+                
+                print(f"Saved market analysis: {filepath_full} ({len(market_df)} quotes)")
+    
     def preprocess_game_props(self, game_df, alternate_df, period_df):
         if game_df.empty:
                 print(f"No game data for event {self.event['id']} – skipping.")
@@ -1117,6 +1214,17 @@ class OddsProcessor:
                 print("\n MISPRICED DF: \n")
                 print(mispriced_player_df)
 
+            # Save market analysis for player props when mispriced lines are found
+            if not mispriced_player_df.empty and mode=="test":
+                self.save_market_analysis(
+                    mispriced_df=mispriced_player_df,
+                    merged_df_with_exp=with_exp_prob,
+                    event_id=event_id,
+                    timestamp=timestamp,
+                    market_type="player",
+                    filepath=filepath
+                )
+
             if verbose:
                 print("Finding arbitrage opportunities")
 
@@ -1208,7 +1316,18 @@ class OddsProcessor:
                 print("\n MISPRICED DF: \n")
                 print(mispriced_game_df)
 
+            # Save market analysis for game props when mispriced lines are found
+            if not mispriced_game_df.empty and mode=="test":
+                self.save_market_analysis(
+                    mispriced_df=mispriced_game_df,
+                    merged_df_with_exp=merged_game_w_exp_prob,
+                    event_id=event_id,
+                    timestamp=timestamp,
+                    market_type="game",
+                    filepath=filepath
+                )
+
         
         return (arb_player_df, arb_game_df, mispriced_player_df, mispriced_game_df)
-    
+
 
