@@ -4,7 +4,8 @@ load_dotenv()
 
 class Config:
     """Configuration class for the application."""
-    
+
+    DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///./telegram_users.db')
     ODDS_API_KEY = os.getenv('ODDS_API_KEY')
     TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
     TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')

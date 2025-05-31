@@ -9,3 +9,8 @@ apscheduler
 dotenv
 matplotlib
 python-telegram-bot
+SQLAlchemy
+psycopg2-binary
+pytest
+pytest-asyncio
+pytest-mock
