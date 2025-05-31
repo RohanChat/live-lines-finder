@@ -5,8 +5,8 @@ from telegram import KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove, U
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 from sqlalchemy.exc import SQLAlchemyError # Added for specific DB error handling
 
-from src.config import Config
-from src.database import get_db_session, User, init_db
+from config import Config
+from database import get_db_session, User, init_db
 
 # Setup Logging
 logging.basicConfig(

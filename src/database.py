@@ -2,7 +2,7 @@ from sqlalchemy import create_engine, Column, Integer, String, BigInteger
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
-from src.config import Config
+from config import Config
 
 # Define a base class for declarative models
 Base = declarative_base()
