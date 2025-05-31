@@ -6,6 +6,8 @@ class Config:
     """Configuration class for the application."""
     
     ODDS_API_KEY = os.getenv('ODDS_API_KEY')
+    TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+    TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
     sport = "basketball_nba"
     odds_format = "american"
 

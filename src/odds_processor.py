@@ -6,6 +6,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from sklearn.isotonic import IsotonicRegression
 from scipy.interpolate import PchipInterpolator
+from scipy.stats import norm
+from scipy.optimize import minimize
 
 from utils.file_utils import load_file_with_string
 from config import Config
@@ -571,6 +573,19 @@ class OddsProcessor:
             merged_rows.append(row)
         
         return pd.DataFrame(merged_rows)
+    
+    def _fit_normal_cdf(self, x, y):
+
+        def objective(params):
+            mu, sigma = params
+            y_pred = norm.cdf(x, mu, sigma)
+            return np.sum((y - y_pred)**2)
+
+        mu0 = np.mean(x)  # Initial guess for mean
+        sigma0 = np.std(x)  # Initial guess for std dev
+        res = minimize(objective, [mu0, sigma0], method='Nelder-Mead')
+        mu, sigma = res.x
+        return lambda t: norm.cdf(t, mu, sigma)
     
     def _fit_monotone_cdf(self, x, y):
         """Return a callable CDF fitted with Isotonic → PCHIP smoothing."""
