@@ -5,8 +5,8 @@ from telegram import KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove, U
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 from sqlalchemy.exc import SQLAlchemyError # Added for specific DB error handling
 
-from config import Config
-from database import get_db_session, User, init_db
+from src.config import Config
+from src.database import get_db_session, User, init_db
 
 # Setup Logging
 logging.basicConfig(
@@ -120,41 +120,37 @@ async def contact_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 async def main() -> None:
-    """Runs the Telegram bot."""
-    # Initialize the database and create tables if they don't exist
-    logger.info("Initializing database...")
+    # Initialize the database
     try:
         init_db()
         logger.info("Database initialization complete.")
     except Exception as e:
-        logger.critical(f"Critical: Database initialization failed: {e}", exc_info=True)
-        # Depending on the application's needs, you might want to exit or handle this differently.
-        # For a bot that relies on the DB, exiting might be appropriate.
-        return # or raise SystemExit(1) or exit(1) after ensuring cleanup if any
+        logger.critical(f"Database initialization failed: {e}", exc_info=True)
+        return  # Exit if DB init fails
 
     logger.info("Starting bot...")
+
+    # Create the Application and pass it your bot's token.
     application = ApplicationBuilder().token(Config.TELEGRAM_BOT_TOKEN).build()
 
-    # Add handlers
-    application.add_handler(CommandHandler('start', start_command))
+    # Add command handlers
+    application.add_handler(CommandHandler("start", start_command))
     application.add_handler(MessageHandler(filters.CONTACT, contact_handler))
 
-    logger.info("Bot is starting to poll...")
     # Run the bot until the user presses Ctrl-C
     try:
+        logger.info("Bot is starting to poll...")
         await application.run_polling(allowed_updates=Update.ALL_TYPES)
+    except (KeyboardInterrupt, SystemExit):
+        logger.info("Bot polling was stopped by user (KeyboardInterrupt/SystemExit).")
     except Exception as e:
-        logger.error(f"Error during bot polling: {e}")
+        logger.error(f"An unexpected error occurred during bot polling: {e}", exc_info=True)
     finally:
-        logger.info("Bot polling stopped.")
+        logger.info("Bot application has finished.")
 
 
-if __name__ == '__main__':
-    # Ensure that the event loop is running for asyncio.run()
-    # This is generally handled well by asyncio.run itself in Python 3.7+
+if __name__ == "__main__":
     try:
         asyncio.run(main())
-    except KeyboardInterrupt:
-        logger.info("Bot stopped by user (KeyboardInterrupt).")
     except Exception as e:
         logger.critical(f"Application failed to run: {e}", exc_info=True)
