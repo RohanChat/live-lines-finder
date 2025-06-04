@@ -5,8 +5,8 @@ from telegram import KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove, U
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 from sqlalchemy.exc import SQLAlchemyError # Added for specific DB error handling
 
-from src.config import Config
-from src.database import get_db_session, User, init_db
+from config import Config
+from database import get_db_session, User, init_db
 
 # Setup Logging
 logging.basicConfig(
@@ -119,7 +119,7 @@ async def contact_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         )
 
 
-async def main() -> None:
+def main() -> None:
     # Initialize the database
     try:
         init_db()
@@ -140,7 +140,7 @@ async def main() -> None:
     # Run the bot until the user presses Ctrl-C
     try:
         logger.info("Bot is starting to poll...")
-        await application.run_polling(allowed_updates=Update.ALL_TYPES)
+        application.run_polling(allowed_updates=Update.ALL_TYPES)
     except (KeyboardInterrupt, SystemExit):
         logger.info("Bot polling was stopped by user (KeyboardInterrupt/SystemExit).")
     except Exception as e:
@@ -151,6 +151,6 @@ async def main() -> None:
 
 if __name__ == "__main__":
     try:
-        asyncio.run(main())
+        main()
     except Exception as e:
         logger.critical(f"Application failed to run: {e}", exc_info=True)

@@ -1,6 +1,6 @@
 import requests
 import logging # Added for logging
-from src.config import Config # Corrected import path
+from config import Config # Corrected import path
 from telegram import Bot
 from telegram.error import BadRequest, Forbidden # Added for error handling
 from sqlalchemy.exc import SQLAlchemyError # Added for specific DB error handling
