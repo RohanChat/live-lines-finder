@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch, call # Added call for che
 
 from sqlalchemy.orm import Session
 
-from src.bot import start_command, contact_handler
+from src.telegram_bot import start_command, contact_handler
 from src.database import User
 
 from telegram import Update, Chat, Message, User as TelegramUser, KeyboardButton, ReplyKeyboardMarkup, Contact
