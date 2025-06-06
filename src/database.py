@@ -1,6 +1,7 @@
 from datetime import datetime
 import uuid
-from sqlalchemy import Boolean, DateTime, create_engine, Column, Integer, String, BigInteger
+from sqlalchemy import Boolean, DateTime, create_engine, Column, BigInteger, Text
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
@@ -13,16 +14,16 @@ Base = declarative_base()
 class User(Base):
     __tablename__ = "users"
 
-    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    email = Column(String, nullable=True)
-    phone_number = Column(String, nullable=True)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    email = Column(Text, nullable=True)
+    phone_number = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     chat_id = Column(BigInteger, unique=True, nullable=False, index=True)
     
     # Subscription fields
     is_subscribed = Column(Boolean, default=False, nullable=False)
-    stripe_customer_id = Column(String, nullable=True)
+    stripe_customer_id = Column(Text, nullable=True)
     subscription_end_date = Column(DateTime, nullable=True)
 
     def __repr__(self):
