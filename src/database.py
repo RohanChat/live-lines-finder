@@ -1,4 +1,6 @@
-from sqlalchemy import create_engine, Column, Integer, String, BigInteger
+from datetime import datetime
+import uuid
+from sqlalchemy import DateTime, create_engine, Column, Integer, String, BigInteger
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
@@ -11,9 +13,12 @@ Base = declarative_base()
 class User(Base):
     __tablename__ = "users"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))  
+    email = Column(String, nullable=True)  # Add the email column
+    phone_number = Column(String, nullable=True)  # Change from 'phone' to 'phone_number'
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     chat_id = Column(BigInteger, unique=True, nullable=False, index=True)
-    phone_number = Column(String, nullable=True)
 
     def __repr__(self):
         return f"<User(id={self.id}, chat_id={self.chat_id}, phone_number='{self.phone_number}')>"
