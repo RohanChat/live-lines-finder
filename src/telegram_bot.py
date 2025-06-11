@@ -124,6 +124,22 @@ async def handle_verification_callback(update: Update, context: ContextTypes.DEF
         ])
         
         await query.edit_message_text(message, reply_markup=keyboard, parse_mode='Markdown')
+    
+    elif query.data == "retry_verification":
+        # Handle retry verification - same as verify_phone but with different messaging
+        await query.edit_message_text(
+            "Let's try the verification again. Please share your contact information by clicking the button below.\n\n"
+            "Make sure you're using the same phone number associated with your subscription."
+        )
+        
+        # Send a new message with the contact request keyboard
+        contact_button = KeyboardButton(text="📱 Share Contact", request_contact=True)
+        reply_markup = ReplyKeyboardMarkup([[contact_button]], one_time_keyboard=True, resize_keyboard=True)
+
+        await query.message.reply_text(
+            "👇 Click the button below to share your contact information:",
+            reply_markup=reply_markup
+        )
 
 
 async def contact_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -144,8 +160,8 @@ async def contact_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         if not customer_id:
             # No Stripe customer found with this phone number
             keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("🌐 Subscribe Now", url="https://buy.stripe.com/3cs7tobZl17z0o05kk")],  # Replace with your website
-                [InlineKeyboardButton("❓ Need Help?", callback_data="need_help")]
+                [InlineKeyboardButton("🌐 Subscribe Now\n(USE SAME PHONE NUMBER)", url="https://buy.stripe.com/3cs7tobZl17z0o05kk")],  # Replace with your website
+                [InlineKeyboardButton("🔄 Re-try Verification", callback_data="retry_verification")]
             ])
             
             await update.message.reply_text(

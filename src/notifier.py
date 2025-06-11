@@ -4,6 +4,8 @@ from config import Config # Corrected import path
 from telegram import Bot
 from telegram.error import BadRequest, Forbidden # Added for error handling
 from sqlalchemy.exc import SQLAlchemyError # Added for specific DB error handling
+import pandas as pd
+import asyncio
 
 from src.database import get_db_session, User # Added for database interaction
 
@@ -15,23 +17,81 @@ class Notifier:
         self.config = Config()
         self.message = ""
 
+    def get_subscribers(self, db):
+        """
+        Fetch all users who have provided a phone number and are subscribed.
+        """
+        try:
+            return db.query(User).filter(User.phone_number.isnot(None), User.is_subscribed.is_(True)).all()
+        except SQLAlchemyError as e:
+            logger.error(f"Database error while fetching subscribers: {e}", exc_info=True)
+            return []
+
     def notify(self, message):
         raise NotImplementedError("Subclasses should implement this method")
     
-    def format_message(self, df):
+    def process_dfs(self, *dfs):
         """
-        Format the DataFrame into a Markdown message.
+        process the first half of the dataframes as arbitrage messages, and the second half as mispriced messages.
+        """
+        if not dfs:
+            logger.warning("No DataFrames provided for processing.")
+            return
+        
+        mid_index = len(dfs) // 2
+        arbitrage_dfs = dfs[:mid_index]
+        mispriced_dfs = dfs[mid_index:]
+
+        arbitrage_message = self.format_arbitrage_message(arbitrage_dfs[0]) if arbitrage_dfs else ""
+        mispriced_message = self.format_mispriced_message(mispriced_dfs[0]) if mispriced_dfs else ""
+
+        self.message = f"{arbitrage_message}\n\n{mispriced_message}"
+        logger.info("Processed DataFrames into messages.")
+        
+    
+
+    def format_mispriced_message(self, df):
+        """
+        Format the DataFrame into a safe text message without complex Markdown.
         """
         if df.empty:
-            return "No data available."
+            return ""
         
-        message = "### Today's NBA Events\n\n"
+        message = "LATEST MISPRICED / +EV LINES:\n\n"
         for index, row in df.iterrows():
-            message += f"- **{row['event_name']}**: {row['start_time']} - {row['status']}\n"
-            message += f"  - Odds: {row['odds']}\n"
-            message += f"  - Links: {row['links']}\n\n"
+            # Use simple formatting to avoid Markdown parsing issues
+            event_name = str(row.get('event_name', 'Unknown Event'))
+            start_time = str(row.get('start_time', 'TBD'))
+            status = str(row.get('status', 'Unknown'))
+            odds = str(row.get('odds', 'N/A'))
+            links = str(row.get('links', 'N/A'))
+            
+            message += f"• {event_name}: {start_time} - {status}\n"
+            message += f"  Odds: {odds}\n"
+            message += f"  Links: {links}\n\n"
 
-        self.message = message
+        return message
+    
+    def format_arbitrage_message(self, df):
+        """
+        Format the DataFrame into a safe text message without complex Markdown.
+        """
+        if df.empty:
+            return ""
+        
+        message = "LATEST ARBITRAGE OPPORTUNITIES:\n\n"
+        for index, row in df.iterrows():
+            # Use simple formatting to avoid Markdown parsing issues
+            event_name = str(row.get('event_name', 'Unknown Event'))
+            start_time = str(row.get('start_time', 'TBD'))
+            status = str(row.get('status', 'Unknown'))
+            odds = str(row.get('odds', 'N/A'))
+            links = str(row.get('links', 'N/A'))
+            
+            message += f"• {event_name}: {start_time} - {status}\n"
+            message += f"  Odds: {odds}\n"
+            message += f"  Links: {links}\n\n"
+        
         return message
 
     def get_config(self):
@@ -58,23 +118,28 @@ class TelegramNotifier(Notifier):
             logger.warning("No message content to send.")
             return
 
+        # Run the async method in a new event loop
+        asyncio.run(self._send_notifications_async(text_to_send))
+
+    async def _send_notifications_async(self, text_to_send):
         db_session_gen = get_db_session()
         db = next(db_session_gen)
         users_notified_count = 0
         try:
-            users = db.query(User).filter(User.phone_number.isnot(None)).all() # Send only to users who provided phone
+            users = self.get_subscribers(db)
+            logger.debug(f"Fetched {len(users)} users from the database for notification.")
             if not users:
-                logger.info("No registered users with phone numbers found to notify.")
+                logger.info("No registered users with phone numbers and valid subscriptions found to notify.")
                 return
 
             logger.info(f"Attempting to send notification to {len(users)} user(s).")
             for user in users:
                 if user.chat_id:
                     try:
-                        self.bot.send_message(
+                        await self.bot.send_message(
                             chat_id=user.chat_id,
                             text=text_to_send,
-                            parse_mode='Markdown'
+                            parse_mode=None  # Disable Markdown parsing to avoid formatting issues
                         )
                         users_notified_count += 1
                         logger.debug(f"Notification sent to user_id: {user.id}, chat_id: {user.chat_id}")
