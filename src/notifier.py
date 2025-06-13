@@ -7,15 +7,17 @@ from sqlalchemy.exc import SQLAlchemyError # Added for specific DB error handlin
 import pandas as pd
 import asyncio
 
-from src.database import get_db_session, User # Added for database interaction
+from database import get_db_session, User # Added for database interaction
 
 # Setup logger
 logger = logging.getLogger(__name__)
 
 class Notifier:
-    def __init__(self):
+    def __init__(self, include_arbitrage=True, include_mispriced=True):
         self.config = Config()
         self.message = ""
+        self.include_arbitrage = include_arbitrage
+        self.include_mispriced = include_mispriced
 
     def get_subscribers(self, db):
         """
@@ -42,55 +44,117 @@ class Notifier:
         arbitrage_dfs = dfs[:mid_index]
         mispriced_dfs = dfs[mid_index:]
 
-        arbitrage_message = self.format_arbitrage_message(arbitrage_dfs[0]) if arbitrage_dfs else ""
-        mispriced_message = self.format_mispriced_message(mispriced_dfs[0]) if mispriced_dfs else ""
+        arbitrage_message = ""
+        mispriced_message = ""
+        
+        if self.include_arbitrage and arbitrage_dfs:
+            arbitrage_message = self.format_arbitrage_message(arbitrage_dfs[0])
+        
+        if self.include_mispriced and mispriced_dfs:
+            mispriced_message = self.format_mispriced_message(mispriced_dfs[0])
 
-        self.message = f"{arbitrage_message}\n\n{mispriced_message}"
+        self.message = f"{arbitrage_message}\n\n{mispriced_message}".strip()
         logger.info("Processed DataFrames into messages.")
         
     
 
     def format_mispriced_message(self, df):
         """
-        Format the DataFrame into a safe text message without complex Markdown.
+        Format the DataFrame into a message using Telegram markdown.
         """
         if df.empty:
             return ""
         
-        message = "LATEST MISPRICED / +EV LINES:\n\n"
+        message = "*LATEST MISPRICED / +EV LINES:*\n\n"
         for index, row in df.iterrows():
-            # Use simple formatting to avoid Markdown parsing issues
-            event_name = str(row.get('event_name', 'Unknown Event'))
-            start_time = str(row.get('start_time', 'TBD'))
-            status = str(row.get('status', 'Unknown'))
-            odds = str(row.get('odds', 'N/A'))
-            links = str(row.get('links', 'N/A'))
+            # Extract and clean data
+            outcome_desc = str(row.get('outcome_description', 'Unknown Event'))
+            market_key = str(row.get('market_key', 'Unknown Market'))
             
-            message += f"• {event_name}: {start_time} - {status}\n"
-            message += f"  Odds: {odds}\n"
-            message += f"  Links: {links}\n\n"
+            # Handle point values (convert arrays to single values)
+            point = row.get('point', 'N/A')
+            if isinstance(point, (list, tuple)) and len(point) > 0:
+                point = point[0]
+            point = str(point)
+            
+            side = str(row.get('side', 'Unknown'))
+            bookmaker = str(row.get('bookmaker', 'Unknown'))
+            odds = str(row.get('odds', 'N/A'))
+            
+            # Handle edge/expected value
+            edge = row.get('edge', 0)
+            if edge and edge != 0:
+                edge_pct = f"+{edge * 100:.1f}%" if isinstance(edge, (int, float)) else str(edge)
+            else:
+                edge_pct = "N/A"
+            
+            # Handle links
+            links = row.get('links', row.get('link', 'N/A'))
+            if isinstance(links, (list, tuple)):
+                links = ', '.join(str(link) for link in links if link)
+            links = str(links) if links else 'N/A'
+            
+            message += f"• *{outcome_desc}* - {market_key}\n"
+            message += f"  {side} {point} @ {odds} ({bookmaker})\n"
+            if edge_pct != "N/A":
+                message += f"  *Edge:* {edge_pct}\n"
+            if links != 'N/A':
+                message += f"  *Links:* {links}\n"
+            message += "\n"
 
         return message
     
     def format_arbitrage_message(self, df):
         """
-        Format the DataFrame into a safe text message without complex Markdown.
+        Format the DataFrame into a message using Telegram markdown.
         """
         if df.empty:
             return ""
         
-        message = "LATEST ARBITRAGE OPPORTUNITIES:\n\n"
+        message = "*LATEST ARBITRAGE OPPORTUNITIES:*\n\n"
         for index, row in df.iterrows():
-            # Use simple formatting to avoid Markdown parsing issues
-            event_name = str(row.get('event_name', 'Unknown Event'))
-            start_time = str(row.get('start_time', 'TBD'))
-            status = str(row.get('status', 'Unknown'))
-            odds = str(row.get('odds', 'N/A'))
-            links = str(row.get('links', 'N/A'))
+            # Extract arbitrage-specific data
+            outcome_desc = str(row.get('outcome_description', 'Unknown Event'))
+            market_key = str(row.get('market_key', 'Unknown Market'))
             
-            message += f"• {event_name}: {start_time} - {status}\n"
-            message += f"  Odds: {odds}\n"
-            message += f"  Links: {links}\n\n"
+            # Handle over/under points (convert arrays to single values)
+            over_point = row.get('over_point', 'N/A')
+            if isinstance(over_point, (list, tuple)) and len(over_point) > 0:
+                over_point = over_point[0]
+            over_point = str(over_point)
+            
+            under_point = row.get('under_point', 'N/A')
+            if isinstance(under_point, (list, tuple)) and len(under_point) > 0:
+                under_point = under_point[0]
+            under_point = str(under_point)
+            
+            # Bookmaker and odds info
+            over_bookmaker = str(row.get('over_bookmaker', 'Unknown'))
+            under_bookmaker = str(row.get('under_bookmaker', 'Unknown'))
+            over_odds = str(row.get('over_odds', 'N/A'))
+            under_odds = str(row.get('under_odds', 'N/A'))
+            
+            # Calculate profit margin if available
+            sum_prob = row.get('sum_prob', 0)
+            if sum_prob and sum_prob > 0:
+                profit_margin = f"{(1/sum_prob - 1) * 100:.2f}%"
+            else:
+                profit_margin = "N/A"
+            
+            # Handle links
+            links = row.get('links', row.get('link', 'N/A'))
+            if isinstance(links, (list, tuple)):
+                links = ', '.join(str(link) for link in links if link)
+            links = str(links) if links else 'N/A'
+            
+            message += f"• *{outcome_desc}* - {market_key}\n"
+            message += f"  Over {over_point} @ {over_odds} ({over_bookmaker})\n"
+            message += f"  Under {under_point} @ {under_odds} ({under_bookmaker})\n"
+            if profit_margin != "N/A":
+                message += f"  *Profit:* {profit_margin}\n"
+            if links != 'N/A':
+                message += f"  *Links:* {links}\n"
+            message += "\n"
         
         return message
 
@@ -98,8 +162,8 @@ class Notifier:
         return self.config
     
 class TelegramNotifier(Notifier):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, include_arbitrage=True, include_mispriced=True):
+        super().__init__(include_arbitrage, include_mispriced)
         self.botToken = Config.TELEGRAM_BOT_TOKEN
         # self.chat_id = Config.TELEGRAM_CHAT_ID # Removed as chat_id is now dynamic
         if not self.botToken:
@@ -139,7 +203,7 @@ class TelegramNotifier(Notifier):
                         await self.bot.send_message(
                             chat_id=user.chat_id,
                             text=text_to_send,
-                            parse_mode=None  # Disable Markdown parsing to avoid formatting issues
+                            parse_mode='Markdown'  # Enable Markdown parsing for bold text
                         )
                         users_notified_count += 1
                         logger.debug(f"Notification sent to user_id: {user.id}, chat_id: {user.chat_id}")

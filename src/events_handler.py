@@ -160,7 +160,7 @@ if __name__ == "__main__":
         player=True,
         game=True,
         regions=Config.US,
-        mode="test",
+        mode="live",
         filepath="./odds_data",
         interval_minutes=5,
     )

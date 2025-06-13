@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 class NotifierIntegrationTester:
     """Test class to verify the complete odds processing to notification flow."""
     
-    def __init__(self, use_test_mode=True):
+    def __init__(self, use_test_mode=False):
         """
         Initialize the tester.
         
@@ -47,7 +47,7 @@ class NotifierIntegrationTester:
         if not self.use_test_mode:
             # Fetch real events from API
             logger.info("Fetching live events from API...")
-            events = self.event_fetcher.get_events_in_next_hours(hours=24)
+            events = self.event_fetcher.get_events_between_hours()
             if not events:
                 logger.warning("No live events found. Creating mock event for testing.")
                 return self.create_mock_event()
