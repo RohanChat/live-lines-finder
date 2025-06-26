@@ -16,3 +16,4 @@ pytest-asyncio
 pytest-mock
 stripe
 ngrok
+websockets

@@ -30,17 +30,19 @@ logger = logging.getLogger(__name__)
 class NotifierIntegrationTester:
     """Test class to verify the complete odds processing to notification flow."""
     
-    def __init__(self, use_test_mode=False):
+    def __init__(self, include_arbitrage=True, include_mispriced=False, links_only=True, use_test_mode=False):
         """
         Initialize the tester.
         
         Args:
+            links_only (bool): If True, only include arbitrage opportunities with both over and under links.
             use_test_mode (bool): If True, use test mode for odds processor (loads saved data).
                                  If False, fetch live data from API.
         """
         self.use_test_mode = use_test_mode
         self.event_fetcher = EventFetcher()
-        self.notifier = TelegramNotifier()
+        self.notifier = TelegramNotifier(include_arbitrage=include_arbitrage, include_mispriced=include_mispriced, links_only=links_only)
+        logger.info(f"Notifier initialized with arbitrage={include_arbitrage}, mispriced={include_mispriced}, links_only={links_only}")
         
     def get_test_events(self):
         """Get events for testing - either from API or create mock data."""
@@ -126,109 +128,6 @@ class NotifierIntegrationTester:
             logger.error(f"Error processing odds data: {e}", exc_info=True)
             return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
     
-    def format_notification_message(self, arb_player_df, arb_game_df, mispriced_player_df, mispriced_game_df):
-        """
-        Format the odds processing results into a notification message.
-        
-        Args:
-            arb_player_df, arb_game_df, mispriced_player_df, mispriced_game_df: DataFrames from odds processor
-            
-        Returns:
-            str: Formatted message for Telegram
-        """
-        message_parts = []
-        
-        # Header
-        message_parts.append("🔥 **LIVE BETTING OPPORTUNITIES** 🔥\n")
-        
-        # Arbitrage opportunities
-        if not arb_player_df.empty or not arb_game_df.empty:
-            message_parts.append("⚡ **ARBITRAGE OPPORTUNITIES** ⚡\n")
-            
-            if not arb_player_df.empty:
-                message_parts.append("**Player Props:**")
-                for _, row in arb_player_df.head(5).iterrows():  # Limit to 5 for readability
-                    outcome_desc = row.get('outcome_description', 'Unknown Player')
-                    market_key = row.get('market_key', 'Unknown Market')
-                    over_point = row.get('over_point', 'N/A')
-                    under_point = row.get('under_point', 'N/A')
-                    over_bookmaker = row.get('over_bookmaker', 'Unknown')
-                    under_bookmaker = row.get('under_bookmaker', 'Unknown')
-                    sum_prob = row.get('sum_prob', 0)
-                    profit_margin = (1 / sum_prob - 1) * 100 if sum_prob > 0 else 0
-                    
-                    message_parts.append(
-                        f"• {outcome_desc} - {market_key}\n"
-                        f"  Over {over_point} @ {over_bookmaker}\n"
-                        f"  Under {under_point} @ {under_bookmaker}\n"
-                        f"  **Profit: {profit_margin:.2f}%**\n"
-                    )
-            
-            if not arb_game_df.empty:
-                message_parts.append("**Game Props:**")
-                for _, row in arb_game_df.head(3).iterrows():  # Limit to 3 for readability
-                    market_key = row.get('market_key', 'Unknown Market')
-                    over_point = row.get('over_point', 'N/A')
-                    under_point = row.get('under_point', 'N/A')
-                    over_bookmaker = row.get('over_bookmaker', 'Unknown')
-                    under_bookmaker = row.get('under_bookmaker', 'Unknown')
-                    sum_prob = row.get('sum_prob', 0)
-                    profit_margin = (1 / sum_prob - 1) * 100 if sum_prob > 0 else 0
-                    
-                    message_parts.append(
-                        f"• {market_key}\n"
-                        f"  Over {over_point} @ {over_bookmaker}\n"
-                        f"  Under {under_point} @ {under_bookmaker}\n"
-                        f"  **Profit: {profit_margin:.2f}%**\n"
-                    )
-        
-        # Mispriced lines
-        if not mispriced_player_df.empty or not mispriced_game_df.empty:
-            message_parts.append("\n💰 **MISPRICED LINES (+EV)** 💰\n")
-            
-            if not mispriced_player_df.empty:
-                message_parts.append("**Player Props:**")
-                for _, row in mispriced_player_df.head(5).iterrows():  # Limit to 5 for readability
-                    outcome_desc = row.get('outcome_description', 'Unknown Player')
-                    market_key = row.get('market_key', 'Unknown Market')
-                    point = row.get('point', 'N/A')
-                    side = row.get('side', 'Unknown')
-                    bookmaker = row.get('bookmaker', 'Unknown')
-                    odds = row.get('odds', 'N/A')
-                    edge = row.get('edge', 0)
-                    edge_pct = edge * 100 if edge else 0
-                    
-                    message_parts.append(
-                        f"• {outcome_desc} - {market_key}\n"
-                        f"  {side} {point} @ {odds} ({bookmaker})\n"
-                        f"  **Edge: +{edge_pct:.1f}%**\n"
-                    )
-            
-            if not mispriced_game_df.empty:
-                message_parts.append("**Game Props:**")
-                for _, row in mispriced_game_df.head(3).iterrows():  # Limit to 3 for readability
-                    market_key = row.get('market_key', 'Unknown Market')
-                    point = row.get('point', 'N/A')
-                    side = row.get('side', 'Unknown')
-                    bookmaker = row.get('bookmaker', 'Unknown')
-                    odds = row.get('odds', 'N/A')
-                    edge = row.get('edge', 0)
-                    edge_pct = edge * 100 if edge else 0
-                    
-                    message_parts.append(
-                        f"• {market_key}\n"
-                        f"  {side} {point} @ {odds} ({bookmaker})\n"
-                        f"  **Edge: +{edge_pct:.1f}%**\n"
-                    )
-        
-        # Footer
-        if not message_parts or len(message_parts) <= 1:
-            message_parts = ["📊 No significant opportunities found at this time.\n\nKeep watching for updates!"]
-        else:
-            message_parts.append(f"\n🕒 Updated: {datetime.now().strftime('%H:%M:%S')}")
-        
-        return "\n".join(message_parts)
-    
     def test_notification_flow(self):
         """Test the complete notification flow."""
         logger.info("Starting notification flow test...")
@@ -243,20 +142,31 @@ class NotifierIntegrationTester:
             # Step 2: Process odds data
             arb_player_df, arb_game_df, mispriced_player_df, mispriced_game_df = self.process_odds_data(events)
             
-            # Step 3: Format message
-            message = self.format_notification_message(
-                arb_player_df, arb_game_df, mispriced_player_df, mispriced_game_df
-            )
+            # Log DataFrame summaries
+            logger.info(f"DataFrames received:")
+            logger.info(f"  - Arbitrage Player: {len(arb_player_df)} rows")
+            logger.info(f"  - Arbitrage Game: {len(arb_game_df)} rows")
+            logger.info(f"  - Mispriced Player: {len(mispriced_player_df)} rows")
+            logger.info(f"  - Mispriced Game: {len(mispriced_game_df)} rows")
             
-            logger.info("Formatted notification message:")
-            logger.info("-" * 50)
-            logger.info(message)
-            logger.info("-" * 50)
+            # Step 3: Use the notifier's formatting methods
+            logger.info("Using notifier's built-in formatting methods...")
+            self.notifier.process_dfs(arb_player_df, arb_game_df, mispriced_player_df, mispriced_game_df)
+            message = self.notifier.message
+            
+            if message:
+                logger.info("Formatted notification message:")
+                logger.info("-" * 50)
+                logger.info(message)
+                logger.info("-" * 50)
+            else:
+                logger.warning("No message generated from DataFrames")
+                return False
             
             # Step 4: Send notification
             if self.notifier.bot:
                 logger.info("Sending notification to subscribers...")
-                self.notifier.notify(message)
+                self.notifier.notify()  # This will use the already formatted message
                 logger.info("Notification sent successfully!")
             else:
                 logger.warning("Telegram bot not configured. Message formatted but not sent.")
@@ -267,48 +177,168 @@ class NotifierIntegrationTester:
         except Exception as e:
             logger.error(f"Error in notification flow test: {e}", exc_info=True)
             return False
-    
+
     def test_with_mock_data(self):
         """Test with mock data to ensure message formatting works."""
         logger.info("Testing with mock data...")
         
-        # Create mock DataFrames
-        mock_arb_player = pd.DataFrame([{
-            'outcome_description': 'LeBron James Points',
-            'market_key': 'player_points',
-            'over_point': 25.5,
-            'under_point': 26.5,
-            'over_bookmaker': 'DraftKings',
-            'under_bookmaker': 'FanDuel',
-            'sum_prob': 0.98,
-            'over_odds': '+110',
-            'under_odds': '-105'
-        }])
+        try:
+            # Create mock DataFrames
+            mock_arb_player = pd.DataFrame([{
+                'outcome_description': 'LeBron James Points',
+                'market_key': 'player_points',
+                'over_point': [25.5],  # Make this an array to test your array handling
+                'under_point': [26.5],
+                'over_bookmaker': 'DraftKings',
+                'under_bookmaker': 'FanDuel',
+                'sum_prob': 0.98,
+                'over_odds': '+110',
+                'under_odds': '-105',
+                'links': ['https://draftkings.com', 'https://fanduel.com']  # Add links
+            }])
+            
+            mock_mispriced_player = pd.DataFrame([{
+                'outcome_description': 'Stephen Curry 3-Pointers',
+                'market_key': 'player_threes',
+                'point': [4.5],  # Make this an array to test your array handling
+                'side': 'Over',
+                'bookmaker': 'BetMGM',
+                'odds': '+120',
+                'edge': 0.08,
+                'links': ['https://betmgm.com']  # Add links
+            }])
+            
+            mock_arb_game = pd.DataFrame()
+            mock_mispriced_game = pd.DataFrame()
+            
+            # Use the notifier's formatting methods instead of custom formatting
+            logger.info("Processing mock data with notifier's formatting methods...")
+            self.notifier.process_dfs(mock_arb_player, mock_arb_game, mock_mispriced_player, mock_mispriced_game)
+            message = self.notifier.message
+            
+            if message:
+                logger.info("Mock data notification message:")
+                logger.info("-" * 50)
+                logger.info(message)
+                logger.info("-" * 50)
+                logger.info("✅ Mock data test completed successfully!")
+                return True
+            else:
+                logger.error("❌ No message generated from mock data")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error in mock data test: {e}", exc_info=True)
+            return False
         
-        mock_mispriced_player = pd.DataFrame([{
-            'outcome_description': 'Stephen Curry 3-Pointers',
-            'market_key': 'player_threes',
-            'point': 4.5,
-            'side': 'Over',
-            'bookmaker': 'BetMGM',
-            'odds': '+120',
-            'edge': 0.08,
-        }])
+
+def test_links_only_comparison():
+    """Test to compare output with and without links_only mode."""
+    logger.info("Testing links_only mode comparison...")
+    
+    try:
+        # Create mock arbitrage data with some entries having links and some not
+        mock_arb_with_links = pd.DataFrame([
+            {
+                'outcome_description': 'LeBron James Points',
+                'market_key': 'player_points',
+                'over_point': [25.5],
+                'under_point': [26.5],
+                'over_bookmaker': 'DraftKings',
+                'under_bookmaker': 'FanDuel',
+                'sum_prob': 0.98,
+                'over_odds': '+110',
+                'under_odds': '-105',
+                'over_link': 'https://draftkings.com/bet1',
+                'under_link': 'https://fanduel.com/bet1'
+            },
+            {
+                'outcome_description': 'Stephen Curry 3-Pointers',
+                'market_key': 'player_threes',
+                'over_point': [4.5],
+                'under_point': [4.5],
+                'over_bookmaker': 'BetMGM',
+                'under_bookmaker': 'Caesars',
+                'sum_prob': 0.97,
+                'over_odds': '+120',
+                'under_odds': '-110',
+                'over_link': '',  # Empty link
+                'under_link': 'https://caesars.com/bet2'  # Only under link
+            },
+            {
+                'outcome_description': 'Giannis Antetokounmpo Rebounds',
+                'market_key': 'player_rebounds',
+                'over_point': [11.5],
+                'under_point': [11.5],
+                'over_bookmaker': 'PointsBet',
+                'under_bookmaker': 'Unibet',
+                'sum_prob': 0.96,
+                'over_odds': '+105',
+                'under_odds': '-115',
+                'over_link': None,  # Null link
+                'under_link': None  # Null link
+            }
+        ])
         
-        mock_arb_game = pd.DataFrame()
-        mock_mispriced_game = pd.DataFrame()
+        empty_dfs = [pd.DataFrame(), pd.DataFrame()]
         
-        # Format and display message
-        message = self.format_notification_message(
-            mock_arb_player, mock_arb_game, mock_mispriced_player, mock_mispriced_game
-        )
+        # Test with links_only=False (should show all opportunities)
+        logger.info("\n" + "="*60)
+        logger.info("TESTING WITH links_only=False (show all opportunities)")
+        logger.info("="*60)
         
-        logger.info("Mock data notification message:")
-        logger.info("-" * 50)
-        logger.info(message)
-        logger.info("-" * 50)
+        notifier_all = TelegramNotifier(include_arbitrage=True, include_mispriced=False, links_only=False)
+        notifier_all.process_dfs(mock_arb_with_links, *empty_dfs)
+        message_all = notifier_all.message
+        
+        if message_all:
+            logger.info("Message with links_only=False:")
+            logger.info("-" * 50)
+            logger.info(message_all)
+            logger.info("-" * 50)
+        
+        # Test with links_only=True (should only show opportunities with both links)
+        logger.info("\n" + "="*60)
+        logger.info("TESTING WITH links_only=True (only opportunities with both links)")
+        logger.info("="*60)
+        
+        notifier_links_only = TelegramNotifier(include_arbitrage=True, include_mispriced=False, links_only=True)
+        notifier_links_only.process_dfs(mock_arb_with_links, *empty_dfs)
+        message_links_only = notifier_links_only.message
+        
+        if message_links_only:
+            logger.info("Message with links_only=True:")
+            logger.info("-" * 50)
+            logger.info(message_links_only)
+            logger.info("-" * 50)
+        else:
+            logger.info("No message generated with links_only=True (expected if no entries have both links)")
+        
+        # Compare results
+        logger.info("\n" + "="*60)
+        logger.info("COMPARISON SUMMARY")
+        logger.info("="*60)
+        
+        all_count = message_all.count('💰') if message_all else 0
+        links_only_count = message_links_only.count('💰') if message_links_only else 0
+        
+        logger.info(f"Opportunities found with links_only=False: {all_count}")
+        logger.info(f"Opportunities found with links_only=True: {links_only_count}")
+        logger.info(f"Filtered out: {all_count - links_only_count}")
+        
+        if all_count > links_only_count:
+            logger.info("✅ links_only mode successfully filtered out opportunities without both links")
+        elif all_count == links_only_count and all_count > 0:
+            logger.info("ℹ️ All opportunities had both links - no filtering occurred")
+        else:
+            logger.info("ℹ️ No opportunities found in either mode")
         
         return True
+        
+    except Exception as e:
+        logger.error(f"Error in links_only comparison test: {e}", exc_info=True)
+        return False
+        
 
 def main():
     """Main function to run the notifier integration test."""
@@ -320,8 +350,9 @@ def main():
     print("1. Test with saved data (test mode)")
     print("2. Test with live API data")
     print("3. Test with mock data only")
+    print("4. Test links_only mode comparison")
     
-    choice = input("\nEnter your choice (1-3): ").strip()
+    choice = input("\nEnter your choice (1-4): ").strip()
     
     if choice == "1":
         tester = NotifierIntegrationTester(use_test_mode=True)
@@ -332,6 +363,8 @@ def main():
     elif choice == "3":
         tester = NotifierIntegrationTester(use_test_mode=True)
         success = tester.test_with_mock_data()
+    elif choice == "4":
+        success = test_links_only_comparison()
     else:
         print("Invalid choice. Defaulting to test mode.")
         tester = NotifierIntegrationTester(use_test_mode=True)
