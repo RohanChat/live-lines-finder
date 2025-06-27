@@ -1342,6 +1342,7 @@ class OddsProcessor:
                     filepath=filepath
                 )
 
+        ## ALWAYS RETURN THE ARBITRAGE DATAFRAMES FIRST!!!
         
         return (arb_player_df, arb_game_df, mispriced_player_df, mispriced_game_df)
 
