@@ -1,9 +1,10 @@
 import pytest
 from sqlalchemy import create_engine
+from sqlalchemy.pool import StaticPool
 from sqlalchemy.orm import sessionmaker
 from unittest.mock import patch
 
-from src.database import Base, init_db as actual_init_db, get_db_session as actual_get_db_session, engine as actual_engine
+from database import Base, init_db as actual_init_db, get_db_session as actual_get_db_session, engine as actual_engine
 
 # Store the original engine and SessionLocal
 OriginalEngine = actual_engine
@@ -21,7 +22,11 @@ def db_session():
     # This is more direct than patching Config.DATABASE_URL if src.database directly uses an engine instance.
 
     # Create a new engine for the in-memory SQLite database
-    test_engine = create_engine("sqlite:///:memory:")
+    test_engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
 
     # Create a new SessionLocal for this engine
     TestSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_engine)
@@ -31,7 +36,9 @@ def db_session():
     # init_db uses `engine` from its own module.
     # get_db_session uses `SessionLocal` from its own module.
 
-    with patch('src.database.engine', test_engine), \
+    with patch('database.engine', test_engine), \
+         patch('database.SessionLocal', TestSessionLocal), \
+         patch('src.database.engine', test_engine), \
          patch('src.database.SessionLocal', TestSessionLocal):
 
         # Initialize the database schema

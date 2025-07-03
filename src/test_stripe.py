@@ -1,7 +1,10 @@
 import sys
+import pytest
 sys.path.append('src')
 
 from stripe_service import StripeService
+
+pytest.skip("Stripe integration test", allow_module_level=True)
 
 # Test with a phone number
 phone = "+447914699809"  # Replace with a real phone from your Stripe account

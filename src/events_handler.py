@@ -11,7 +11,7 @@ from apscheduler.triggers.date     import DateTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from config            import Config
-from event_fetcher     import EventFetcher
+from feeds.the_odds_api     import TheOddsAPI
 from odds_processor    import OddsProcessor
 
 class EventsHandler:
@@ -31,7 +31,7 @@ class EventsHandler:
         pd.set_option("display.max_columns", None)  # Show all columns
         pd.set_option("display.width", None)        # Use full terminal width
         pd.set_option("display.expand_frame_repr", False)  # Don't wrap rows across lines
-        self.fetcher    = EventFetcher()
+        self.fetcher    = TheOddsAPI()
         self.scheduler  = BackgroundScheduler(timezone=pytz.UTC)
 
         # store your thresholds & flags

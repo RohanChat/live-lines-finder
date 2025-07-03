@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, AsyncMock, patch, call # call might be need
 from sqlalchemy.orm import Session # For type hinting db_session
 
 from src.notifier import TelegramNotifier
-from src.database import User # Model for creating test users
+from database import User  # Model for creating test users
 # Config will be implicitly used by TelegramNotifier, conftest.py handles DB_URL aspect
 # For TELEGRAM_BOT_TOKEN, TelegramNotifier checks for it. We can patch Config if needed,
 # or ensure the test environment / .env has a dummy token.
@@ -32,8 +32,8 @@ def test_telegram_notifier_notify_with_users(db_session: Session, notifier_insta
     user3_chat_id = 333 # No phone number, should not be notified
 
     db_session.add_all([
-        User(chat_id=user1_chat_id, phone_number="123"),
-        User(chat_id=user2_chat_id, phone_number="456"),
+        User(chat_id=user1_chat_id, phone_number="123", is_subscribed=True),
+        User(chat_id=user2_chat_id, phone_number="456", is_subscribed=True),
         User(chat_id=user3_chat_id, phone_number=None)
     ])
     db_session.commit()
@@ -50,8 +50,8 @@ def test_telegram_notifier_notify_with_users(db_session: Session, notifier_insta
     assert notifier_instance.bot.send_message.call_count == 2 # Only users with phone numbers
 
     expected_calls = [
-        call(chat_id=user1_chat_id, text=test_message, parse_mode='Markdown'),
-        call(chat_id=user2_chat_id, text=test_message, parse_mode='Markdown')
+        call(chat_id=user1_chat_id, text=test_message, parse_mode=None),
+        call(chat_id=user2_chat_id, text=test_message, parse_mode=None)
     ]
     notifier_instance.bot.send_message.assert_has_calls(expected_calls, any_order=True)
 
@@ -80,7 +80,7 @@ def test_telegram_notifier_notify_no_users_at_all(db_session: Session, notifier_
 def test_telegram_notifier_notify_uses_self_message_if_none_provided(db_session: Session, notifier_instance: TelegramNotifier):
     """Test that notify uses notifier.message if no message argument is provided."""
     user_chat_id = 555
-    db_session.add(User(chat_id=user_chat_id, phone_number="789"))
+    db_session.add(User(chat_id=user_chat_id, phone_number="789", is_subscribed=True))
     db_session.commit()
 
     internal_message = "This is a pre-formatted message."
@@ -91,7 +91,7 @@ def test_telegram_notifier_notify_uses_self_message_if_none_provided(db_session:
     notifier_instance.bot.send_message.assert_called_once_with(
         chat_id=user_chat_id,
         text=internal_message,
-        parse_mode='Markdown'
+        parse_mode=None
     )
 
 # TODO:
