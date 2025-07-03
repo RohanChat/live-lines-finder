@@ -14,18 +14,21 @@ from config import Config
 from itertools import zip_longest   # handles uneven list lengths
 from collections.abc import Iterable
 from itertools import product
+from feeds.base import OddsFeed
 from feeds.the_odds_api import TheOddsAPI
+from .base import AnalysisEngine
 
-class OddsProcessor:
+class OddsProcessor(AnalysisEngine):
     """Process and plot prop markets for an event"""
 
-    def __init__(self, event, arb_thresh = 0.01, p_gap: float = 0.075, ev_thresh: float = 0.10, bootstrap: bool = False):
+    def __init__(self, event, feed: OddsFeed | None = None, arb_thresh: float = 0.01,
+                 p_gap: float = 0.075, ev_thresh: float = 0.10, bootstrap: bool = False):
+        super().__init__(feed or TheOddsAPI())
         self.event     = event
         self.arb_thresh  = arb_thresh
         self.p_gap     = p_gap
         self.ev_thresh = ev_thresh
         self.bootstrap = bootstrap
-        self.event_fetcher = TheOddsAPI()
 
 
 
@@ -1157,8 +1160,8 @@ class OddsProcessor:
                 print("\n")
 
             if mode == "live":
-                player_prop_df = self.event_fetcher.get_props_for_todays_events([event], markets=Config.player_prop_markets)
-                player_alt_df = self.event_fetcher.get_props_for_todays_events([event], markets=Config.player_alternate_markets)
+                player_prop_df = self.feed.get_props_for_todays_events([event], markets=Config.player_prop_markets)
+                player_alt_df = self.feed.get_props_for_todays_events([event], markets=Config.player_alternate_markets)
                 player_prop_df = pd.DataFrame(player_prop_df)
                 player_alt_df = pd.DataFrame(player_alt_df)
                 if not os.path.exists(f"{filepath}/player"):
@@ -1258,9 +1261,9 @@ class OddsProcessor:
                 print("\n")
             
             if mode == "live":
-                game_period_df = self.event_fetcher.get_props_for_todays_events([event], markets=Config.game_period_markets)
-                alternate_df = self.event_fetcher.get_props_for_todays_events([event], markets=Config.alt_markets)
-                game_df = self.event_fetcher.get_props_for_todays_events([event], markets=Config.game_markets)
+                game_period_df = self.feed.get_props_for_todays_events([event], markets=Config.game_period_markets)
+                alternate_df = self.feed.get_props_for_todays_events([event], markets=Config.alt_markets)
+                game_df = self.feed.get_props_for_todays_events([event], markets=Config.game_markets)
                 game_period_df = pd.DataFrame(game_period_df)
                 alternate_df = pd.DataFrame(alternate_df)
                 game_df = pd.DataFrame(game_df)

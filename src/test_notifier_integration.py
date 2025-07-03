@@ -21,7 +21,7 @@ sys.path.insert(0, current_dir)
 sys.path.insert(0, parent_dir)
 
 from notifier import TelegramNotifier
-from odds_processor import OddsProcessor
+from analysis.odds_processor import OddsProcessor
 from feeds.the_odds_api import TheOddsAPI
 from config import Config
 
