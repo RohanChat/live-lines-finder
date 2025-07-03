@@ -14,7 +14,7 @@ from config import Config
 from itertools import zip_longest   # handles uneven list lengths
 from collections.abc import Iterable
 from itertools import product
-from event_fetcher import EventFetcher
+from feeds.the_odds_api import TheOddsAPI
 
 class OddsProcessor:
     """Process and plot prop markets for an event"""
@@ -25,7 +25,7 @@ class OddsProcessor:
         self.p_gap     = p_gap
         self.ev_thresh = ev_thresh
         self.bootstrap = bootstrap
-        self.event_fetcher = EventFetcher()
+        self.event_fetcher = TheOddsAPI()
 
 
 

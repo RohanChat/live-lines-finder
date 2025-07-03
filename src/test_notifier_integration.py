@@ -6,6 +6,9 @@ and verifies the notification system works correctly.
 
 import pandas as pd
 import numpy as np
+import pytest
+
+pytest.skip("Integration test script", allow_module_level=True)
 from datetime import datetime, timezone
 import logging
 import os
@@ -19,7 +22,7 @@ sys.path.insert(0, parent_dir)
 
 from notifier import TelegramNotifier
 from odds_processor import OddsProcessor
-from event_fetcher import EventFetcher
+from feeds.the_odds_api import TheOddsAPI
 from config import Config
 
 # Setup logging
@@ -289,7 +292,7 @@ def test_with_live_data():
         update_notifier_formatting()
         
         # Get a sample event to test with
-        event_fetcher = EventFetcher()
+        event_fetcher = TheOddsAPI()
         events = event_fetcher.get_upcoming_events()
         
         if not events:

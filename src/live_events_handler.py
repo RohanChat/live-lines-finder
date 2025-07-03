@@ -13,7 +13,7 @@ from events_handler import EventsHandler
 from notifier import TelegramNotifier
 from odds_processor import OddsProcessor
 from config import Config
-from event_fetcher import EventFetcher
+from feeds.the_odds_api import TheOddsAPI
 
 class LiveSchedulerWithNotifications(EventsHandler):
     def __init__(self, include_arbitrage=True, include_mispriced=True, links_only=True, *args, **kwargs):
@@ -36,7 +36,7 @@ class LiveSchedulerWithNotifications(EventsHandler):
         pd.set_option("display.width", None)
         pd.set_option("display.expand_frame_repr", False)
         
-        self.fetcher = EventFetcher()
+        self.fetcher = TheOddsAPI()
         self.scheduler = AsyncIOScheduler(timezone=pytz.UTC)  # Use AsyncIOScheduler
 
         # Store thresholds & flags
