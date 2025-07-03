@@ -19,7 +19,7 @@ sys.path.insert(0, src_path)
 
 from config import Config
 from feeds.the_odds_api import TheOddsAPI
-from odds_processor import OddsProcessor
+from analysis.odds_processor import OddsProcessor
 from notifier import TelegramNotifier
 import pandas as pd
 

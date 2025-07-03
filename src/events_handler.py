@@ -12,7 +12,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from config            import Config
 from feeds.the_odds_api     import TheOddsAPI
-from odds_processor    import OddsProcessor
+from analysis.odds_processor    import OddsProcessor
 
 class EventsHandler:
     def __init__(
@@ -127,6 +127,7 @@ class EventsHandler:
         # Correctly pass `event` as first arg to OddsProcessor
         proc = OddsProcessor(
             event,
+            feed=self.fetcher,
             arb_thresh=self.arb_thresh,
             p_gap=self.p_gap,
             ev_thresh=self.ev_thresh,
