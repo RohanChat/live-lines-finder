@@ -177,6 +177,17 @@ async def handle_verification_callback(update: Update, context: ContextTypes.DEF
 
 
 async def contact_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Handles receiving contact information from Telegram users and verifies the phone number using Stripe.
+    
+    This function processes the contact information shared by the user, standardizes the phone number,
+    and checks the subscription status via Stripe. If the contact information is invalid or cannot be
+    processed, it sends an appropriate response to the user.
+    
+    Args:
+        update (telegram.Update): The incoming update containing the user's contact information.
+        context (telegram.ext.ContextTypes.DEFAULT_TYPE): The context for the callback, including bot data.
+    """
     chat_id = update.effective_chat.id
     contact = update.message.contact
     logger.info(f"Received contact information from chat_id: {chat_id}")
