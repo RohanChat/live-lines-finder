@@ -18,7 +18,7 @@ The application uses SQLAlchemy to connect to a database for storing user inform
 
 ### Running the Telegram Bot
 
-The core logic for the Telegram bot resides in `src/bot.py`.
+The core logic for the Telegram bot resides in `src/messaging/telegram/bot.py`.
 
 1.  **Set Environment Variables:**
     *   `TELEGRAM_BOT_TOKEN`: This is essential. You must obtain this token from BotFather on Telegram.
@@ -37,7 +37,7 @@ The core logic for the Telegram bot resides in `src/bot.py`.
 4.  **Run the Bot:**
     Execute the bot script from the project's root directory:
     ```bash
-    python src/bot.py
+    python src/messaging/telegram/bot.py
     ```
     You should see log messages indicating that the bot is initializing and then polling for updates from Telegram.
 
