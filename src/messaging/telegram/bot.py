@@ -128,6 +128,19 @@ async def show_phone_verification_prompt(update: Update, context: ContextTypes.D
 
 
 async def handle_verification_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Handle phone verification callback buttons.
+
+    This function processes callback queries related to phone verification. It handles
+    three types of callback data:
+    - "verify_phone": Prompts the user to share their contact information for verification.
+    - "why_verify": Explains the importance of phone number verification.
+    - "retry_verification": Allows the user to retry the verification process.
+
+    Parameters:
+        update (telegram.Update): The incoming update object containing the callback query.
+        context (telegram.ext.ContextTypes.DEFAULT_TYPE): The context for the callback, including bot data.
+    """
     query = update.callback_query
     await query.answer()
 
