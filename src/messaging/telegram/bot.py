@@ -97,6 +97,17 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 async def show_phone_verification_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Show a phone number verification prompt to the user.
+
+    This function sends a message to the user with options to verify their phone number
+    or learn more about the verification process. It is used to link the user's Telegram
+    account with their subscription status.
+
+    Args:
+        update (telegram.Update): The update object containing information about the incoming message.
+        context (telegram.ext.ContextTypes.DEFAULT_TYPE): The context object for managing bot state and data.
+    """
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("📱 Verify Phone Number", callback_data="verify_phone")],
         [InlineKeyboardButton("ℹ️ Why do I need to verify?", callback_data="why_verify")]
