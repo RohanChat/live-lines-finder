@@ -82,6 +82,9 @@ class ChatbotCore:
             model=self.model,
             messages=[{"role": "user", "content": prompt}],
         )
+        if not resp.choices:
+            logger.warning("OpenAI API returned an empty choices array for line description: %s", line_desc)
+            return "I'm sorry, I couldn't generate an explanation for the given line."
         explanation = resp.choices[0].message["content"].strip()
         logger.debug("OpenAI explanation: %s", explanation)
         return explanation
