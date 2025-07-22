@@ -65,6 +65,9 @@ class ChatbotCore:
             model=self.model,
             messages=[{"role": "user", "content": question}],
         )
+        if not resp.choices:
+            logger.warning("OpenAI API returned an empty choices list")
+            return "OpenAI did not generate a response."
         answer = resp.choices[0].message["content"].strip()
         logger.debug("OpenAI answer: %s", answer)
         return answer
