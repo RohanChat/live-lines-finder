@@ -22,7 +22,7 @@ class ChatbotCore:
         feed: OddsFeed,
         analysis_engines: Optional[Sequence[AnalysisEngine]] = None,
         openai_api_key: Optional[str] = None,
-        model: str = "gpt-3.5-turbo",
+        model: str = "o4-mini",
     ) -> None:
         self.platform = platform
         self.feed = feed
