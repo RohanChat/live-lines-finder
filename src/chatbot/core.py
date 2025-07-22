@@ -58,7 +58,10 @@ class ChatbotCore:
         if not self.openai_api_key:
             logger.warning("OpenAI API key not configured")
             return "OpenAI API key not configured."
-        resp = openai.ChatCompletion.create(
+        if not self.openai_client:
+            logger.warning("OpenAI client not initialized")
+            return "OpenAI client not initialized."
+        resp = self.openai_client.chat.completions.create(
             model=self.model,
             messages=[{"role": "user", "content": question}],
         )
