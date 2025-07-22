@@ -32,7 +32,7 @@ The core logic for the Telegram bot resides in `src/messaging/telegram/bot.py`.
     ```
 
 3.  **Initialize the Database (if needed):**
-    The bot will attempt to create database tables on startup if they don't exist (as defined in `src/database.py` via the `init_db()` function). For a new setup, this should happen automatically.
+    The bot will attempt to create database tables on startup if they don't exist (as defined in `src/database/session.py` via the `init_db()` function). For a new setup, this should happen automatically.
 
 4.  **Run the Bot:**
     Execute the bot script from the project's root directory:
