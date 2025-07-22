@@ -38,8 +38,12 @@ def db_session():
 
     with patch('database.engine', test_engine), \
          patch('database.SessionLocal', TestSessionLocal), \
+         patch('database.session.engine', test_engine), \
+         patch('database.session.SessionLocal', TestSessionLocal), \
          patch('src.database.engine', test_engine), \
-         patch('src.database.SessionLocal', TestSessionLocal):
+         patch('src.database.SessionLocal', TestSessionLocal), \
+         patch('src.database.session.engine', test_engine), \
+         patch('src.database.session.SessionLocal', TestSessionLocal):
 
         # Initialize the database schema
         # init_db() in src.database uses Base.metadata.create_all(bind=engine)
