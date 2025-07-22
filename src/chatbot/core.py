@@ -30,7 +30,9 @@ class ChatbotCore:
         self.model = model
         self.openai_api_key = openai_api_key or os.getenv("OPENAI_API_KEY")
         if self.openai_api_key:
-            openai.api_key = self.openai_api_key
+            self.openai_client = openai.OpenAI(api_key=self.openai_api_key)
+        else:
+            self.openai_client = None
         logger.debug("ChatbotCore initialized with %d analysis engines", len(self.engines))
 
     def add_engine(self, engine: AnalysisEngine) -> None:
