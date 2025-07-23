@@ -1,7 +1,7 @@
 from ..base import BaseMessagingClient
 
 
-class SlackBot(BaseMessagingClient):
+class iMessageBot(BaseMessagingClient):
     """Placeholder for future Slack integration."""
 
     def __init__(self, token: str) -> None:

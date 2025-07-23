@@ -12,17 +12,18 @@ from .base import OddsFeed
 class TheOddsAPI(OddsFeed):
     """Implementation of :class:`OddsFeed` using the the-odds-api.com service."""
 
-    BASE_URL = "https://api.the-odds-api.com/v4"
+    def __init__(self):
+        super().__init__()
 
     def get_todays_events(
         self,
         commence_time_from: str = f"{datetime.utcnow().date().isoformat()}T00:00:00Z",
         commence_time_to: str = f"{datetime.utcnow().date().isoformat()}T23:59:59Z",
     ) -> List[Dict[str, Any]]:
-        sport = Config.sport
-        events_url = f"{self.BASE_URL}/sports/{sport}/events"
+        sport = self.sport
+        events_url = f"{self.base_url}/sports/{sport}/events"
         params_events = {
-            "apiKey": Config.ODDS_API_KEY,
+            "apiKey": self.api_key,
             "commenceTimeFrom": commence_time_from,
             "commenceTimeTo": commence_time_to,
             "dateFormat": "iso",
@@ -43,16 +44,20 @@ class TheOddsAPI(OddsFeed):
 
         return events
 
-    def get_game_odds(self, markets: str = Config.game_markets, regions: str = Config.US) -> List[Dict[str, Any]]:
+    def get_game_odds(self, markets: str, regions: str) -> List[Dict[str, Any]]:
+
+        markets = markets or self.game_markets
+        regions = regions or self.US
+
         rows: List[Dict[str, Any]] = []
-        sport = Config.sport
-        odds_url = f"{self.BASE_URL}/sports/{sport}/odds"
+        sport = self.sport
+        odds_url = f"{self.base_url}/sports/{sport}/odds"
 
         params_odds = {
-            "apiKey": Config.ODDS_API_KEY,
+            "apiKey": self.api_key,
             "regions": regions,
             "markets": markets,
-            "oddsFormat": Config.odds_format,
+            "oddsFormat": self.odds_format,
             "dateFormat": "iso",
             "includeLinks": "true",
         }
@@ -105,9 +110,11 @@ class TheOddsAPI(OddsFeed):
     def get_props_for_todays_events(
         self,
         events: Iterable[Dict[str, Any]],
-        markets: str = Config.player_prop_markets,
-        regions: str = Config.US,
+        markets: str,
+        regions: str,
     ) -> List[Dict[str, Any]]:
+        markets = markets or self.player_prop_markets
+        regions = regions or self.US
         rows: List[Dict[str, Any]] = []
         print(f"Fetching {markets} prop odds for each event...")
         for event in events:
@@ -115,14 +122,14 @@ class TheOddsAPI(OddsFeed):
             commence_time = event.get("commence_time")
             home_team = event.get("home_team")
             away_team = event.get("away_team")
-            sport = Config.sport
+            sport = self.sport
 
-            odds_url = f"{self.BASE_URL}/sports/{sport}/events/{event_id}/odds"
+            odds_url = f"{self.base_url}/sports/{sport}/events/{event_id}/odds"
             params_odds = {
-                "apiKey": Config.ODDS_API_KEY,
+                "apiKey": self.api_key,
                 "regions": regions,
                 "markets": markets,
-                "oddsFormat": Config.odds_format,
+                "oddsFormat": self.odds_format,
                 "dateFormat": "iso",
                 "includeLinks": "true",
             }

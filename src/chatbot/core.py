@@ -46,7 +46,7 @@ class ChatbotCore:
         for event in events:
             for engine in self.engines:
                 try:
-                    engine.process_event(event)
+                    engine.process_odds_for_event(event)
                 except Exception:  # pragma: no cover - defensive
                     logger.exception("Error processing event with %s", engine.__class__.__name__)
 

@@ -17,3 +17,4 @@ pytest-mock
 stripe
 ngrok
 websockets
+openai
