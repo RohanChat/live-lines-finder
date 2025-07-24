@@ -12,6 +12,6 @@ class AnalysisEngine(ABC):
         self.feed = feed
 
     @abstractmethod
-    def process_event(self, event: Dict[str, Any], *args, **kwargs):
+    def process_odds_for_event(self, event, *args, **kwargs):
         """Analyse odds data for the given event."""
         raise NotImplementedError

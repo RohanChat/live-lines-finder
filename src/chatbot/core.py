@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 import os
 import logging
 from typing import Iterable, Sequence, Dict, Any, Optional
 
 import openai
 
+from config import Config
 from messaging.base import BaseMessagingClient
 from feeds.base import OddsFeed
 from analysis.base import AnalysisEngine
@@ -28,7 +30,7 @@ class ChatbotCore:
         self.feed = feed
         self.engines: list[AnalysisEngine] = list(analysis_engines or [])
         self.model = model
-        self.openai_api_key = openai_api_key or os.getenv("OPENAI_API_KEY")
+        self.openai_api_key = openai_api_key or Config.OPENAI_API_KEY
         if self.openai_api_key:
             self.openai_client = openai.OpenAI(api_key=self.openai_api_key)
         else:
@@ -53,24 +55,84 @@ class ChatbotCore:
     # ------------------------------------------------------------------
     # OpenAI helpers
     # ------------------------------------------------------------------
+    def _openai_functions(self):
+        return [
+            {
+                "name": "best_picks",
+                "description": "Return top arbitrage opportunities in the next X hours",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "hours": {"type": "integer", "default": 24}
+                    }
+                },
+            },
+            {
+                "name": "build_parlay",
+                "description": "Build a high-value parlay with N legs over the next X hours",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "legs":  {"type": "integer", "default": 4},
+                        "hours": {"type": "integer", "default": 24},
+                    }
+                },
+            },
+        ]
+
     def ask_question(self, question: str) -> str:
-        """Return an answer from OpenAI for the given question."""
-        if not self.openai_api_key:
-            logger.warning("OpenAI API key not configured")
-            return "OpenAI API key not configured."
-        if not self.openai_client:
-            logger.warning("OpenAI client not initialized")
-            return "OpenAI client not initialized."
+        system = (
+            "You are a sports-betting assistant. "
+            "For requests like “high value lines” or “best bets”, use the best_picks function. "
+            "For parlays, use the build_parlay function."
+        )
         resp = self.openai_client.chat.completions.create(
             model=self.model,
-            messages=[{"role": "user", "content": question}],
+            messages=[
+                {"role":"system",  "content":system},
+                {"role":"user",    "content":question},
+            ],
+            functions=self._openai_functions(),
+            function_call="auto",
         )
-        if not resp.choices:
-            logger.warning("OpenAI API returned an empty choices list")
-            return "OpenAI did not generate a response."
-        answer = resp.choices[0].message["content"].strip()
-        logger.debug("OpenAI answer: %s", answer)
-        return answer
+        msg = resp.choices[0].message
+
+        # if it chose a function, dispatch
+        if fc := msg.get("function_call"):
+            name, args = fc["name"], json.loads(fc["arguments"] or "{}")
+            if name == "best_picks":
+                return self._generate_best_picks(hours=args.get("hours",24))
+            if name == "build_parlay":
+                return self._generate_parlay(
+                    legs=args.get("legs",4), hours=args.get("hours",24)
+                )
+        # otherwise just return the LLM text
+        return msg["content"].strip()
+    
+    def _generate_best_picks(self, hours: int) -> str:
+        evs = self.feed.get_events_in_next_hours(hours)
+        lines = []
+        for ev in evs:
+            for engine in self.engines:
+                # This is where you invoke your engine
+                df = engine.process_odds_for_event(ev)
+                top = df.sort_values("arb_profit_margin", ascending=False).head(1)
+                for _, r in top.iterrows():
+                    lines.append(
+                        f"*{r.outcome_description}* `{r.arb_profit_margin:.2%}`\n"
+                        f"{r.over_link} | {r.under_link}"
+                    )
+        return "\n\n".join(lines) or "No arbitrage found."
+
+    def _generate_parlay(self, legs: int, hours: int) -> str:
+        evs = self.feed.get_events_in_next_hours(hours)[:legs]
+        picks = []
+        for ev in evs:
+            for engine in self.engines:
+                df = engine.process_odds_for_event(ev)
+                best = df.sort_values("sum_prob").iloc[0]
+                picks.append(f"{best.outcome_description}: {best.over_odds or best.under_odds}")
+        return "Your parlay:\n" + "\n".join(picks)
 
     def explain_line(self, line_desc: str) -> str:
         """Ask OpenAI to explain a betting line."""
@@ -107,9 +169,18 @@ class ChatbotCore:
             return
         explanation = self.explain_line(desc)
         await self.platform.send_message(update.effective_chat.id, explanation)
+    
+    async def _handle_message(self, update, context) -> None:
+        """Handle general messages."""
+        text = update.message.text.strip() or ""
+        if text.startswith("/"):
+            return
+        answer = self.ask_question(text)
+        await self.platform.send_message(update.effective_chat.id, answer)
 
     def start(self) -> None:
         """Register handlers and start the messaging platform."""
         self.platform.register_command_handler("ask", self._handle_ask)
         self.platform.register_command_handler("explain", self._handle_explain)
+        
         self.platform.start()
