@@ -18,3 +18,4 @@ stripe
 ngrok
 websockets
 openai
+supabase
