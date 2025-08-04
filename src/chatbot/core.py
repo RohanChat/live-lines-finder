@@ -146,8 +146,11 @@ class ChatbotCore:
         msg = resp.choices[0].message
 
         # if it chose a function, dispatch
-        if fc := msg.get("function_call"):
-            name, args = fc["name"], json.loads(fc["arguments"] or "{}")
+        if hasattr(msg, "function_call") and msg.function_call:
+            # Access as object properties, not dictionary keys
+            name = msg.function_call.name
+            args = json.loads(msg.function_call.arguments or "{}")
+            
             if name == "best_picks":
                 return self._generate_best_picks(hours=args.get("hours",24))
             if name == "build_parlay":
@@ -155,7 +158,7 @@ class ChatbotCore:
                     legs=args.get("legs",4), hours=args.get("hours",24)
                 )
         # otherwise just return the LLM text
-        return msg["content"].strip()
+        return msg.content.strip() if msg.content else ""
     
     def _generate_best_picks(self, hours: int) -> str:
         evs = self.feed.get_events_in_next_hours(hours)
@@ -195,7 +198,7 @@ class ChatbotCore:
         if not resp.choices:
             logger.warning("OpenAI API returned an empty choices array for line description: %s", line_desc)
             return "I'm sorry, I couldn't generate an explanation for the given line."
-        explanation = resp.choices[0].message["content"].strip()
+        explanation = resp.choices[0].message.content.strip()
         logger.debug("OpenAI explanation: %s", explanation)
         return explanation
 

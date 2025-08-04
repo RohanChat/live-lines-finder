@@ -29,5 +29,8 @@ class Config:
 
     # keys for the different products and their product ids from stripe
     PRODUCT_IDS = {
-        'betting_assistant': os.getenv('BETTING_ASSISTANT_STRIPE_PRODUCT_ID'),
+        'betting_assistant': {
+            'live': os.getenv('BETTING_ASSISTANT_STRIPE_PRODUCT_ID'),
+            'test': os.getenv('TEST_PRODUCT_ID')  # Default test product ID
+        }
     }
