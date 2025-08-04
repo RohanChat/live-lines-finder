@@ -6,11 +6,12 @@ from config import Config
 
 
 class MockMessagingClient(BaseMessagingClient):
-    def __init__(self):
+    def __init__(self, chat_id: str = Config.MOCK_CHAT_ID):
         # store the handlers you register
         self._cmd_handlers: List[Tuple[str, Callable]] = []
         self._msg_handlers: List[Tuple[Callable[[Any], bool], Callable]] = []
         self.sent: List[Tuple[Any,str,dict]] = []
+        self.chat_id = chat_id
 
     def register_message_handler(self, filter: Callable[[Any], bool], handler: Callable) -> None:
         """Register a message handler with a filter."""
@@ -53,8 +54,10 @@ class MockMessagingClient(BaseMessagingClient):
         except KeyboardInterrupt:
             print("\nExiting mock client.")
 
-    def simulate_message(self, text: str, chat_id: Any=Config.MOCK_CHAT_ID):
+    def simulate_message(self, text: str, chat_id: str = None):
         """Synchronously invoke any message handler whose filter passes."""
+        if chat_id is None:
+            chat_id = self.chat_id
         class M: pass
         update = M(); update.effective_chat=type("c",(object,),{"id":chat_id}); update.message=type("m",(object,),{"text": text})
         context = None

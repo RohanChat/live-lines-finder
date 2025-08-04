@@ -30,6 +30,12 @@ def main():
         default='mock',
         help="Platform to run the chatbot on: 'telegram' for Telegram, 'imessage' for iMessage, or 'mock' for a cli client."
     )
+    parser.add_argument(
+        '--chat_id',
+        type=str,
+        default=Config.MOCK_CHAT_ID,
+        help="Set a chat id: ONLY FOR TESTING PURPOSES. This will be used by the mock client to simulate a chat environment."
+    )
 
     args = parser.parse_args()
 
@@ -44,13 +50,17 @@ def main():
         product_id = Config.PRODUCT_IDS['betting_assistant']['live']
 
     if args.platform == 'telegram':
+        if args.chat_id:
+            print("YOU CAN ONLY SET A CHAT ID WHEN USING THE MOCK CLIENT. THIS WILL BE IGNORED.")
         platform = TelegramBot(token=Config.TELEGRAM_BOT_TOKEN)
     elif args.platform == 'imessage':
+        if args.chat_id:
+            print("YOU CAN ONLY SET A CHAT ID WHEN USING THE MOCK CLIENT. THIS WILL BE IGNORED.")
         platform = iMessageBot()
-    else:
+    elif args.platform == 'mock':
         print("[INFO] Running with mock messaging client.")
         # Use the mock client for testing purposes
-        platform = MockMessagingClient()
+        platform = MockMessagingClient(chat_id=args.chat_id)
 
     if not platform or not product_id:
         print("[ERROR] Platform or mode not configured correctly. Exiting.")
