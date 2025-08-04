@@ -9,4 +9,6 @@ __pycache__/
 *.DS_Store
 supabase/
 *.db
-tests/
+*.sqlite3
+
+.vscode/

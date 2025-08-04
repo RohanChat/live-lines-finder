@@ -19,7 +19,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from config import Config
 from database import get_db_session, User, init_db
-from stripe_service import StripeService
+from utils.stripe_service import StripeService
 from utils.phone_utils import standardize_phone_number
 from ..base import BaseMessagingClient
 
