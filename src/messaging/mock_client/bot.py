@@ -2,6 +2,7 @@ from typing import Any, Callable, List, Tuple
 import asyncio
 
 from messaging.base import BaseMessagingClient
+from config import Config
 
 
 class MockMessagingClient(BaseMessagingClient):
@@ -11,34 +12,48 @@ class MockMessagingClient(BaseMessagingClient):
         self._msg_handlers: List[Tuple[Callable[[Any], bool], Callable]] = []
         self.sent: List[Tuple[Any,str,dict]] = []
 
+    def register_message_handler(self, filter: Callable[[Any], bool], handler: Callable) -> None:
+        """Register a message handler with a filter."""
+        if not callable(filter):
+            raise ValueError("Filter must be a callable that takes a message and returns a boolean.")
+        if not callable(handler):
+            raise ValueError("Handler must be a callable that takes (update, context).")
+        self._msg_handlers.append((filter, handler))
+
+    def register_command_handler(self, command: str, handler: Callable) -> None:
+        """Register a command handler for the given command."""
+        if not isinstance(command, str) or not command.startswith('/'):
+            raise ValueError("Command must be a string starting with '/'")
+        if not callable(handler):
+            raise ValueError("Handler must be a callable that takes (update, context).")
+        self._cmd_handlers.append((command, handler))
+
     async def send_message(self, chat_id: Any, text: str, **kwargs) -> None:
         # capture outbound messages
         self.sent.append((chat_id, text, kwargs))
 
-    def register_command_handler(self, command: str, handler: Callable) -> None:
-        self._cmd_handlers.append((command, handler))
-
-    def register_message_handler(self, filter_obj: Any, handler: Callable) -> None:
-        self._msg_handlers.append((filter_obj, handler))
-
-    def register_callback_query_handler(self, handler: Callable) -> None:
-        # ignore for now
-        pass
-
     def start(self) -> None:
-        # we don’t automatically read stdin—tests will drive simulate_*()
-        pass
+        print("Mock Messaging CLI – type a message and press enter (Ctrl-C to quit).")
+        try:
+            while True:
+                text = input("YOU> ").strip()
+                if not text:
+                    continue
 
-    def simulate_command(self, command: str, args: list[str]=[], chat_id: Any=1):
-        """Synchronously invoke your /cmd handlers."""
-        class C: pass
-        update = C(); update.effective_chat=type("c",(object,),{"id":chat_id})
-        context = type("ctx",(object,),{"args": args})
-        for cmd, fn in self._cmd_handlers:
-            if cmd == command:
-                asyncio.run(fn(update, context))
+                # Drive the normal message‐handler flow
+                self.simulate_message(text)
 
-    def simulate_message(self, text: str, chat_id: Any=1):
+                # Pull out and print any replies
+                for _, reply, _ in self.sent:
+                    print(f"BOT> {reply}")
+
+                # Clear out history so we only show new messages next round
+                self.sent.clear()
+
+        except KeyboardInterrupt:
+            print("\nExiting mock client.")
+
+    def simulate_message(self, text: str, chat_id: Any=Config.MOCK_CHAT_ID):
         """Synchronously invoke any message handler whose filter passes."""
         class M: pass
         update = M(); update.effective_chat=type("c",(object,),{"id":chat_id}); update.message=type("m",(object,),{"text": text})

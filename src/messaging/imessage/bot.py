@@ -6,18 +6,15 @@ class iMessageBot(BaseMessagingClient):
 
     def __init__(self, token: str) -> None:
         self.token = token
-        # TODO: Initialize Slack client when implemented
+        # TODO: Initialize imessage client when implemented
 
-    async def send_message(self, chat_id, text: str, **kwargs) -> None:
+    def register_message_handler(self, command: str, handler) -> None:
         raise NotImplementedError("imessage messaging not implemented yet")
-
+    
     def register_command_handler(self, command: str, handler) -> None:
         raise NotImplementedError("imessage messaging not implemented yet")
 
-    def register_message_handler(self, filter_obj, handler) -> None:
-        raise NotImplementedError("imessage messaging not implemented yet")
-
-    def register_callback_query_handler(self, handler) -> None:
+    async def send_message(self, chat_id, text: str, **kwargs) -> None:
         raise NotImplementedError("imessage messaging not implemented yet")
 
     def start(self) -> None:

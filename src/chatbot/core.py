@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from functools import wraps
 import json
 import os
 import logging
@@ -8,12 +9,57 @@ from typing import Iterable, Sequence, Dict, Any, Optional
 import openai
 
 from config import Config
+from database import get_db_session
+from database.models import UserSubscription
+from database.session import get_user_by_phone
 from messaging.base import BaseMessagingClient
 from feeds.base import OddsFeed
 from analysis.base import AnalysisEngine
 
 logger = logging.getLogger(__name__)
 
+def require_subscription(fn):
+    @wraps(fn)
+    async def wrapper(self, update, context):
+        # 1. Get the unique chat identifier from the messaging platform.
+        # This works for the mock client, Telegram (integer ID), and iMessage (phone number).
+        chat_id = getattr(update.effective_chat, "id", None) or getattr(update, "chat_id", None)
+        if not chat_id:
+            logger.warning("Could not determine chat_id from update.")
+            return
+
+        db = next(get_db_session())
+        try:
+            # 2. Find the user record using the chat_id.
+            user = get_user_by_phone(db, chat_id)
+
+            # 3. Check if the user exists and has a phone number registered.
+            if not user or not user.phone:
+                await self.platform.send_message(
+                    chat_id,
+                    "Your account is not fully set up. Please register your phone number on our website to continue."
+                )
+                return
+
+            # 4. Check for a specific, active subscription for that user.
+            active_subscription = db.query(UserSubscription).filter(
+                UserSubscription.user_id == user.id,
+                UserSubscription.active == True,
+                UserSubscription.product_id == self.product_id
+            ).first()
+
+            if not active_subscription:
+                await self.platform.send_message(
+                    chat_id,
+                    "🚫 You don't have an active subscription for this service. Please visit our website to subscribe."
+                )
+                return
+
+            # 5. If all checks pass, proceed to the original handler.
+            return await fn(self, update, context)
+        finally:
+            db.close()
+    return wrapper
 
 class ChatbotCore:
     """Coordinate messaging, odds feeds and analysis engines."""
@@ -25,11 +71,13 @@ class ChatbotCore:
         analysis_engines: Optional[Sequence[AnalysisEngine]] = None,
         openai_api_key: Optional[str] = None,
         model: str = "o4-mini",
+        product_id: Optional[str] = None
     ) -> None:
         self.platform = platform
         self.feed = feed
         self.engines: list[AnalysisEngine] = list(analysis_engines or [])
         self.model = model
+        self.product_id = product_id or Config.PRODUCT_IDS.first()
         self.openai_api_key = openai_api_key or Config.OPENAI_API_KEY
         if self.openai_api_key:
             self.openai_client = openai.OpenAI(api_key=self.openai_api_key)
@@ -154,6 +202,8 @@ class ChatbotCore:
     # ------------------------------------------------------------------
     # Messaging integration
     # ------------------------------------------------------------------
+
+    @require_subscription
     async def _handle_ask(self, update, context) -> None:  # pragma: no cover - Telegram interface
         question = " ".join(getattr(context, "args", []) or [])
         if not question:
@@ -162,6 +212,7 @@ class ChatbotCore:
         answer = self.ask_question(question)
         await self.platform.send_message(update.effective_chat.id, answer)
 
+    @require_subscription
     async def _handle_explain(self, update, context) -> None:  # pragma: no cover - Telegram interface
         desc = " ".join(getattr(context, "args", []) or [])
         if not desc:
@@ -170,6 +221,7 @@ class ChatbotCore:
         explanation = self.explain_line(desc)
         await self.platform.send_message(update.effective_chat.id, explanation)
     
+    @require_subscription
     async def _handle_message(self, update, context) -> None:
         """Handle general messages."""
         text = update.message.text.strip() or ""
@@ -180,7 +232,7 @@ class ChatbotCore:
 
     def start(self) -> None:
         """Register handlers and start the messaging platform."""
-        self.platform.register_command_handler("ask", self._handle_ask)
-        self.platform.register_command_handler("explain", self._handle_explain)
-        
+        # self.platform.register_command_handler("ask", self._handle_ask)
+        # self.platform.register_command_handler("explain", self._handle_explain)
+        self.platform.register_message_handler(lambda msg: True, self._handle_message)
         self.platform.start()

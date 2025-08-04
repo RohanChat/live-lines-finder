@@ -1140,7 +1140,7 @@ class OddsProcessor(AnalysisEngine):
     def process_odds_for_event(
         self, event, 
         p_gap, ev_thresh, bootstrap=False, arb_thresh=0.01,
-        player=True, game=False, regions=Config.US, 
+        player=True, game=False, 
         mode="live", filepath="odds_data", verbose=False
         ):
         
@@ -1160,8 +1160,8 @@ class OddsProcessor(AnalysisEngine):
                 print("\n")
 
             if mode == "live":
-                player_prop_df = self.feed.get_props_for_todays_events([event], markets=Config.player_prop_markets)
-                player_alt_df = self.feed.get_props_for_todays_events([event], markets=Config.player_alternate_markets)
+                player_prop_df = self.feed.get_props_for_todays_events([event], markets=self.feed.player_prop_markets)
+                player_alt_df = self.feed.get_props_for_todays_events([event], markets=self.feed.player_alternate_markets)
                 player_prop_df = pd.DataFrame(player_prop_df)
                 player_alt_df = pd.DataFrame(player_alt_df)
                 if not os.path.exists(f"{filepath}/player"):
@@ -1261,9 +1261,9 @@ class OddsProcessor(AnalysisEngine):
                 print("\n")
             
             if mode == "live":
-                game_period_df = self.feed.get_props_for_todays_events([event], markets=Config.game_period_markets)
-                alternate_df = self.feed.get_props_for_todays_events([event], markets=Config.alt_markets)
-                game_df = self.feed.get_props_for_todays_events([event], markets=Config.game_markets)
+                game_period_df = self.feed.get_props_for_todays_events([event], markets=self.feed.game_period_markets)
+                alternate_df = self.feed.get_props_for_todays_events([event], markets=self.feed.alt_markets)
+                game_df = self.feed.get_props_for_todays_events([event], markets=self.feed.game_markets)
                 game_period_df = pd.DataFrame(game_period_df)
                 alternate_df = pd.DataFrame(alternate_df)
                 game_df = pd.DataFrame(game_df)
