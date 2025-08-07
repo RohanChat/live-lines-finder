@@ -19,6 +19,7 @@ Key files and directories in the project:
 │   ├── chatbot/core.py         # Core chatbot logic & subscription decorator
 │   ├── database/models.py      # SQLAlchemy database models (User, Product, Subscription)
 │   ├── database/session.py     # Database session management and initialization
+│   ├── analysis/               # folder containing the analysis engines that process and analyse odds data 
 │   ├── messaging/              # Platform-specific messaging clients
 │   │   ├── base.py             # Abstract base class for all clients
 │   │   ├── mock_client/        # Mock CLI client for local testing
