@@ -17,6 +17,7 @@ class Config:
     ODDSPAPI_WSS_URL = os.getenv('ODDSPAPI_WSS_URL')
     ODDSPAPI_CLIENT_NAME = os.getenv('ODDSPAPI_CLIENT_NAME')
     ODDSPAPI_CLIENT_API_KEY = os.getenv('ODDSPAPI_CLIENT_API_KEY')
+    BOLTODDS_TOKEN = os.getenv('BOLTODDS_API_KEY') 
     MOCK_CHAT_ID = os.getenv('MOCK_CHAT_ID')  # Default mock chat ID
     
     # Stripe Configuration
