@@ -4,7 +4,7 @@ A subscription-gated, multi-platform chatbot providing sports betting analysis. 
 
 ## Features
 
-- **Multi-Platform:** Supports Telegram iMessage, a mock command-line interface for testing, and can be extended to other platforms.
+- **Multi-Platform:** Supports Telegram, iMessage, a mock command-line interface for testing, and can be extended to other platforms.
 - **Subscription Gating:** Access is controlled by checking for an active user subscription against a specific product ID in the database.
 - **Configurable Modes:** Run in `live` or `test` modes to connect to different backend services or configurations.
 - **Decoupled Architecture:** The central chatbot logic is completely separate from the platform-specific messaging clients.
@@ -19,6 +19,7 @@ Key files and directories in the project:
 │   ├── chatbot/core.py         # Core chatbot logic & subscription decorator
 │   ├── database/models.py      # SQLAlchemy database models (User, Product, Subscription)
 │   ├── database/session.py     # Database session management and initialization
+│   ├── feeds/                  # folder with the different odds feeds that we can / will use
 │   ├── analysis/               # folder containing the analysis engines that process and analyse odds data 
 │   ├── messaging/              # Platform-specific messaging clients
 │   │   ├── base.py             # Abstract base class for all clients
