@@ -15,7 +15,7 @@ from itertools import zip_longest   # handles uneven list lengths
 from collections.abc import Iterable
 from itertools import product
 from feeds.base import OddsFeed
-from feeds.the_odds_api import TheOddsAPI
+from feeds.api.the_odds_api import TheOddsAPI
 from .base import AnalysisEngine
 
 class OddsProcessor(AnalysisEngine):

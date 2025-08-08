@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from typing import Iterable, List, Dict, Any
 
 from config import Config
-from .base import OddsFeed
+from ..base import OddsFeed
 
 
 class TheOddsAPI(OddsFeed):
