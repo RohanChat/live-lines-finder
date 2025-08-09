@@ -5,7 +5,7 @@ import requests
 from datetime import datetime, timedelta
 from typing import Iterable, List, Dict, Any
 
-from config import Config
+from ...config import Config
 from ..base import OddsFeed
 
 

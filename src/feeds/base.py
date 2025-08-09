@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Iterable, List, Dict, Any
 
-from config import Config
+from ..config import Config
 
 class OddsFeed(ABC):
     """Interface for classes providing odds and event data."""

@@ -65,7 +65,7 @@ def save_data(data: list, filename_prefix: str):
     os.makedirs(output_dir, exist_ok=True)
     
     timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    file_path = os.path.join(output_dir, f"{filename_prefix}_{timestamp}.json")
+    file_path = os.path.join(output_dir, f"/api/{filename_prefix}_{timestamp}.json")
     
     with open(file_path, 'w') as f:
         json.dump(data, f, indent=4)

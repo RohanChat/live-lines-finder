@@ -8,7 +8,7 @@ from typing import Callable, List, Dict, Any, Iterable
 import websockets
 from dotenv import load_dotenv
 
-from config import Config
+from ...config import Config
 
 from ..base import OddsFeed
 

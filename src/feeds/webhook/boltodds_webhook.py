@@ -4,8 +4,8 @@ import os
 from datetime import datetime
 import websockets
 
-from config import Config
-from feeds.webhook.webhook import WebhookFeed
+from ...config import Config
+from .webhook import WebhookFeed
 
 
 class BoltOddsWebhook(WebhookFeed):
