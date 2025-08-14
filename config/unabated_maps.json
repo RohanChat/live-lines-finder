@@ -1,0 +1,26 @@
+{
+  "LEAGUE_MAP": {
+    "nfl": 1,
+    "ncaaf": 2,
+    "nba": 3,
+    "ncaab": 4,
+    "mlb": 5,
+    "nhl": 6,
+    "wnba": 7
+  },
+  "SPORT_MAP": {
+    "nfl": "americanfootball_nfl",
+    "ncaaf": "americanfootball_ncaa",
+    "nba": "basketball_nba",
+    "ncaab": "basketball_ncaa",
+    "mlb": "baseball_mlb",
+    "nhl": "icehockey_nhl",
+    "wnba": "basketball_wnba"
+  },
+  "MARKET_TYPE_MAP": {
+    "moneyline": "h2h",
+    "spread": "spread",
+    "total": "total",
+    "team_total": "team_total"
+  }
+}

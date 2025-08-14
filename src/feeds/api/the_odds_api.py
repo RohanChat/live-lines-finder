@@ -1,189 +1,183 @@
 from __future__ import annotations
-
-import pandas as pd
 import requests
-from datetime import datetime, timedelta
-from typing import Iterable, List, Dict, Any
+from datetime import datetime
+from typing import List, Dict, Any, Optional
 
-from ...config import Config
-from ..base import OddsFeed
+from src.config import Config
+from src.feeds.base import OddsFeed
+from src.feeds.models import (
+    SportKey,
+    MarketKey,
+    Event,
+    EventOdds,
+    Bookmaker,
+    Competitor,
+    Market,
+    OutcomePrice,
+    Period,
+)
+from src.feeds.query import FeedQuery
 
+def american_to_decimal(american_odds: int) -> float:
+    if american_odds > 0:
+        return round(1 + (american_odds / 100), 2)
+    else:
+        return round(1 - (100 / american_odds), 2)
 
-class TheOddsAPI(OddsFeed):
-    """Implementation of :class:`OddsFeed` using the the-odds-api.com service."""
+class TheOddsApiAdapter(OddsFeed):
+    """
+    Adapter for The Odds API (https://the-odds-api.com/).
+    """
+    BASE_URL = "https://api.the-odds-api.com/v4"
 
-    def __init__(self):
-        super().__init__()
+    # Basic mapping from TOA keys to our internal SportKey enum
+    SPORT_MAP = {
+        "americanfootball_nfl": SportKey.NFL,
+        "americanfootball_ncaaf": SportKey.NCAAF,
+        "basketball_nba": SportKey.NBA,
+        "basketball_ncaab": SportKey.NCAAB,
+        "baseball_mlb": SportKey.MLB,
+        "icehockey_nhl": SportKey.NHL,
+    }
 
-    def get_todays_events(
-        self,
-        commence_time_from: str = f"{datetime.utcnow().date().isoformat()}T00:00:00Z",
-        commence_time_to: str = f"{datetime.utcnow().date().isoformat()}T23:59:59Z",
-    ) -> List[Dict[str, Any]]:
-        sport = self.sport
-        events_url = f"{self.base_url}/sports/{sport}/events"
-        params_events = {
-            "apiKey": self.api_key,
-            "commenceTimeFrom": commence_time_from,
-            "commenceTimeTo": commence_time_to,
+    MARKET_MAP = {
+        "h2h": MarketKey.H2H,
+        "spreads": MarketKey.SPREAD,
+        "totals": MarketKey.TOTAL,
+    }
+
+    def __init__(self, api_key: str | None = None):
+        self.api_key = api_key or Config.ODDS_API_KEY
+        if not self.api_key:
+            raise ValueError("TheOddsAPI API key is not configured.")
+
+    def _make_request(self, endpoint: str, params: Dict[str, Any] | None = None) -> Any:
+        url = f"{self.BASE_URL}/{endpoint}"
+        all_params = {"apiKey": self.api_key}
+        if params:
+            all_params.update(params)
+
+        response = requests.get(url, params=all_params)
+        response.raise_for_status()  # Raise an exception for bad status codes
+        return response.json()
+
+    def list_sports(self) -> List[SportKey]:
+        raw_sports = self._make_request("sports")
+        return [self.SPORT_MAP[s["key"]] for s in raw_sports if s["key"] in self.SPORT_MAP]
+
+    def list_bookmakers(self) -> List[Bookmaker]:
+        # The Odds API doesn't have a dedicated bookmaker endpoint.
+        # This would typically be derived from get_odds calls.
+        # For now, we return a hardcoded list based on common US books.
+        # A better implementation would dynamically build this.
+        return [
+            Bookmaker(key="draftkings", title="DraftKings"),
+            Bookmaker(key="fanduel", title="FanDuel"),
+            Bookmaker(key="betmgm", title="BetMGM"),
+        ]
+
+    def list_markets(self, sport: SportKey | None = None) -> List[MarketKey]:
+        # Returns the featured markets that are most common.
+        return [MarketKey.H2H, MarketKey.SPREAD, MarketKey.TOTAL]
+
+    def get_events(self, q: FeedQuery) -> List[Event]:
+        if not q.sport:
+            raise ValueError("A sport must be specified for get_events.")
+
+        reverse_sport_map = {v: k for k, v in self.SPORT_MAP.items()}
+        sport_key_str = reverse_sport_map.get(q.sport)
+
+        params = {"dateFormat": "iso"}
+        if q.start_time_from:
+            params["commenceTimeFrom"] = q.start_time_from.isoformat()
+
+        raw_events = self._make_request(f"sports/{sport_key_str}/events", params)
+        return [self._normalize_event(e) for e in raw_events]
+
+    def get_odds(self, q: FeedQuery) -> List[EventOdds]:
+        if not q.sport:
+            raise ValueError("A sport must be specified for get_odds.")
+
+        reverse_sport_map = {v: k for k, v in self.SPORT_MAP.items()}
+        sport_key_str = reverse_sport_map.get(q.sport)
+
+        params = {
+            "regions": "us",
+            "markets": "h2h,spreads,totals",
+            "oddsFormat": "american",
             "dateFormat": "iso",
         }
-        print("Commence From:", commence_time_from)
-        print("Commence To:", commence_time_to)
-        print("Fetching today's NBA events...")
-        response_events = requests.get(events_url, params=params_events)
-        print("URL:", response_events.url)
-        if response_events.status_code != 200:
-            print("Error fetching events:", response_events.status_code, response_events.text)
-            return []
+        if q.regions:
+            params["regions"] = ",".join(q.regions)
+        if q.markets:
+            reverse_market_map = {v: k for k, v in self.MARKET_MAP.items()}
+            params["markets"] = ",".join([reverse_market_map[m] for m in q.markets])
 
-        events = response_events.json()
-        if not events:
-            print("No NBA events found for today.")
-            return []
+        raw_odds_data = self._make_request(f"sports/{sport_key_str}/odds", params)
+        return [self._normalize_event_odds(raw_event, raw_event, q) for raw_event in raw_odds_data]
 
-        return events
 
-    def get_game_odds(self, markets: str, regions: str) -> List[Dict[str, Any]]:
+    def get_event_odds(self, event_id: str, q: FeedQuery) -> EventOdds:
+        if not q.sport:
+            raise ValueError("A sport must be specified for get_event_odds.")
 
-        markets = markets or self.game_markets
-        regions = regions or self.US
+        reverse_sport_map = {v: k for k, v in self.SPORT_MAP.items()}
+        sport_key_str = reverse_sport_map.get(q.sport)
 
-        rows: List[Dict[str, Any]] = []
-        sport = self.sport
-        odds_url = f"{self.base_url}/sports/{sport}/odds"
-
-        params_odds = {
-            "apiKey": self.api_key,
-            "regions": regions,
-            "markets": markets,
-            "oddsFormat": self.odds_format,
+        params = {
+            "regions": "us",
+            "markets": "h2h,spreads,totals",
+            "oddsFormat": "american",
             "dateFormat": "iso",
-            "includeLinks": "true",
         }
-        response_odds = requests.get(odds_url, params=params_odds)
-        if response_odds.status_code != 200:
-            print("Error fetching game odds:", response_odds.status_code, response_odds.text)
-            return []
 
-        odds_data = response_odds.json()
-        if not odds_data:
-            print("No game odds found.")
-            return []
+        raw_event_with_odds = self._make_request(f"sports/{sport_key_str}/events/{event_id}/odds", params)
+        return self._normalize_event_odds(raw_event_with_odds, raw_event_with_odds, q)
 
-        for bookmaker in odds_data.get("bookmakers", []):
-            bookmaker_key = bookmaker.get("key")
-            bookmaker_title = bookmaker.get("title")
+    def _normalize_event(self, raw: Dict[str, Any]) -> Event:
+        competitors = [
+            Competitor(name=raw["home_team"], role="home"),
+            Competitor(name=raw["away_team"], role="away"),
+        ]
+        return Event(
+            event_id=raw["id"],
+            sport_key=self.SPORT_MAP.get(raw["sport_key"], raw["sport_key"]),
+            league=raw.get("sport_league"),
+            start_time=datetime.fromisoformat(raw["commence_time"].replace("Z", "+00:00")),
+            status="upcoming",  # TOA doesn't provide a clear status field in this context
+            competitors=competitors,
+        )
+
+    def _normalize_event_odds(self, raw_event: Dict[str, Any], raw_odds: Dict[str, Any], q: FeedQuery) -> EventOdds:
+        event = self._normalize_event(raw_event)
+
+        markets = {} # Group by market_key
+
+        for bookmaker in raw_odds.get("bookmakers", []):
+            book_key = bookmaker["key"]
             for market in bookmaker.get("markets", []):
-                market_key = market.get("key")
-                market_last_update = market.get("last_update")
-                for outcome in market.get("outcomes", []):
-                    outcome_name = outcome.get("name")
-                    outcome_description = outcome.get("description", "")
-                    outcome_price = outcome.get("price")
-                    outcome_point = outcome.get("point", None)
+                market_key_str = market["key"]
+                market_key_enum = self.MARKET_MAP.get(market_key_str)
 
-                    rows.append(
-                        {
-                            "bookmaker_key": bookmaker_key,
-                            "bookmaker_title": bookmaker_title,
-                            "market_key": market_key,
-                            "market_last_update": market_last_update,
-                            "outcome_name": outcome_name,
-                            "outcome_description": outcome_description,
-                            "outcome_price": outcome_price,
-                            "outcome_point": outcome_point,
-                        }
+                if not market_key_enum:
+                    continue # Skip unknown markets
+
+                if market_key_enum not in markets:
+                    markets[market_key_enum] = Market(
+                        market_key=market_key_enum,
+                        period=Period.FULL_GAME # TOA basic odds are full game
                     )
-        return rows
 
-    def get_events_between_hours(self, prev_hours: int = 6, next_hours: int = 24) -> List[Dict[str, Any]]:
-        time_now_string = (datetime.utcnow() - timedelta(hours=prev_hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
-        time_x_hours_from_now = (datetime.utcnow() + timedelta(hours=next_hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
-        return self.get_todays_events(commence_time_from=time_now_string, commence_time_to=time_x_hours_from_now)
+                for outcome in market.get("outcomes", []):
+                    price_american = outcome["price"]
+                    outcome_price = OutcomePrice(
+                        outcome_key=outcome["name"],
+                        price_american=price_american,
+                        price_decimal=american_to_decimal(price_american),
+                        line=outcome.get("point"),
+                        bookmaker_key=book_key,
+                        last_update=datetime.fromisoformat(market["last_update"].replace("Z", "+00:00")),
+                    )
+                    markets[market_key_enum].outcomes.append(outcome_price)
 
-    def get_events_in_next_hours(self, hours: int = 24) -> List[Dict[str, Any]]:
-        time_now_string = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
-        time_x_hours_from_now = (datetime.utcnow() + timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
-        return self.get_todays_events(commence_time_from=time_now_string, commence_time_to=time_x_hours_from_now)
-
-    def get_props_for_todays_events(
-        self,
-        events: Iterable[Dict[str, Any]],
-        markets: str,
-        regions: str,
-    ) -> List[Dict[str, Any]]:
-        markets = markets or self.player_prop_markets
-        regions = regions or self.US
-        rows: List[Dict[str, Any]] = []
-        print(f"Fetching {markets} prop odds for each event...")
-        for event in events:
-            event_id = event.get("id")
-            commence_time = event.get("commence_time")
-            home_team = event.get("home_team")
-            away_team = event.get("away_team")
-            sport = self.sport
-
-            odds_url = f"{self.base_url}/sports/{sport}/events/{event_id}/odds"
-            params_odds = {
-                "apiKey": self.api_key,
-                "regions": regions,
-                "markets": markets,
-                "oddsFormat": self.odds_format,
-                "dateFormat": "iso",
-                "includeLinks": "true",
-            }
-
-            response_odds = requests.get(odds_url, params=params_odds)
-            if response_odds.status_code != 200:
-                print(f"Error fetching odds for event {event_id}: {response_odds.status_code} {response_odds.text}")
-                print(odds_url)
-                continue
-
-            odds_data = response_odds.json()
-            if not odds_data:
-                print(f"No odds data for event {event_id}")
-                continue
-
-            for bookmaker in odds_data.get("bookmakers", []):
-                bookmaker_key = bookmaker.get("key")
-                bookmaker_title = bookmaker.get("title")
-                for market in bookmaker.get("markets", []):
-                    market_key = market.get("key")
-                    market_last_update = market.get("last_update")
-                    for outcome in market.get("outcomes", []):
-                        outcome_name = outcome.get("name")
-                        outcome_description = outcome.get("description", "")
-                        outcome_price = outcome.get("price")
-                        outcome_point = outcome.get("point", None)
-                        link = outcome.get("link")
-
-                        rows.append(
-                            {
-                                "event_id": event_id,
-                                "commence_time": commence_time,
-                                "home_team": home_team,
-                                "away_team": away_team,
-                                "bookmaker_key": bookmaker_key,
-                                "bookmaker_title": bookmaker_title,
-                                "market_key": market_key,
-                                "market_last_update": market_last_update,
-                                "outcome_name": outcome_name,
-                                "outcome_description": outcome_description,
-                                "outcome_price": outcome_price,
-                                "outcome_point": outcome_point,
-                                "link": link,
-                            }
-                        )
-        return rows
-
-    def save_todays_events_to_csv(self, rows: Iterable[Dict[str, Any]], key: str = "player", filepath: str = "odds_data") -> None:
-        now = datetime.utcnow().isoformat()
-        if rows:
-            df = pd.DataFrame(rows)
-            csv_filename = f"{filepath}/nba_{key}_props_{now}.csv"
-            df.to_csv(csv_filename, index=False)
-            print(f"Saved data for {len(rows)} outcomes to {csv_filename}")
-        else:
-            print("No odds data was retrieved for the market.")
-
+        return EventOdds(event=event, markets=list(markets.values()))

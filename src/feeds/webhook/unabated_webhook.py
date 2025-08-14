@@ -1,161 +1,109 @@
 from __future__ import annotations
-
-import os
-import json
 import asyncio
+import json
 import websockets
 import base64
 import uuid
-from datetime import datetime
-from typing import Any, Dict
+from typing import List, Dict, Any
 
 from src.config import Config
-from .webhook import WebhookFeed
+from src.feeds.models import FeedDelta, DeltaType
+from src.feeds.webhook.webhook import WebhookFeed
 
+# Based on the original unabated_webhook.py file
+SUBSCRIPTION_QUERY = """
+    subscription marketLineUpdate {
+      marketLineUpdate {
+        leagueId
+        marketSourceGroup
+        marketLines {
+          marketId
+          marketLineId
+          price
+          statusId
+        }
+      }
+    }
+"""
 
-class UnabatedWebhook(WebhookFeed):
-    """Receive odds updates via the Unabated GraphQL websocket feed."""
+class UnabatedWsAdapter(WebhookFeed):
+    """
+    Adapter for the Unabated GraphQL WebSocket feed, using manual protocol implementation.
+    """
 
-    def __init__(self) -> None:
+    def __init__(self, api_key: str | None = None, host: str | None = None):
         super().__init__()
-        self.client_name = "UnabatedWebhookClient"
-        
-        # Load credentials from config
-        self.host = Config.UNABATED_REALTIME_API_HOST
-        self.api_key = Config.UNABATED_API_KEY
-
-        # --- Add this for debugging ---
-        print(f"--- DEBUG: Loaded UNABATED_REALTIME_API_HOST = '{self.host}' (Type: {type(self.host)}) ---")
-        # --- End of debug code ---
+        self.host = host or Config.UNABATED_REALTIME_API_HOST
+        self.api_key = api_key or Config.UNABATED_API_KEY
         
         if not self.host or not self.api_key:
-            raise ValueError("Missing Unabated realtime host or API key in environment variables.")
+            raise ValueError("Unabated real-time host or API key is not configured.")
 
         # Construct the special WebSocket URL required by AWS AppSync
         endpoint = f"wss://{self.host}/graphql/realtime"
         header = base64.b64encode(json.dumps({"host": self.host, "Authorization": self.api_key}).encode()).decode()
         payload = base64.b64encode(b"{}").decode()
         self.wss_url = f"{endpoint}?header={header}&payload={payload}"
+        self.websocket = None
+        self.subscription_id = str(uuid.uuid4())
 
-    async def _subscribe(self) -> None:
-        """
-        Connect to the Unabated websocket, subscribe to the GraphQL feed,
-        and process incoming messages.
-        """
-        print(f"Connecting to {self.client_name}...")
-        self._is_running = True
+    async def _connect(self) -> None:
+        """Establishes the WebSocket connection."""
+        self.websocket = await websockets.connect(self.wss_url, subprotocols=['graphql-ws'])
+        # 1. Send connection_init
+        await self.websocket.send(json.dumps({
+            "type": "connection_init",
+            "payload": {"authorization": {"host": self.host, "Authorization": self.api_key}}
+        }))
 
-        while self._is_running:
-            try:
-                async with websockets.connect(self.wss_url, subprotocols=['graphql-ws']) as websocket:
-                    print(f"{self.client_name} connected successfully.")
-                    
-                    # 1. Send connection_init message
-                    await websocket.send(json.dumps({
-                        "type": "connection_init",
-                        "payload": {"authorization": {"host": self.host, "Authorization": self.api_key}}
-                    }))
+    async def _disconnect(self) -> None:
+        """Closes the WebSocket connection."""
+        if self.websocket:
+            await self.websocket.close()
 
-                    # 2. Prepare the subscription payload
-                    subscription_id = str(uuid.uuid4())
-                    subscription_query = """
-                        subscription marketLineUpdate {
-                          marketLineUpdate {
-                            leagueId
-                            marketSourceGroup
-                            messageId
-                            messageTimestamp
-                            marketLines {
-                              marketId
-                              marketLineId
-                              marketSourceId
-                              points
-                              price
-                              statusId
-                              edge
-                              marketLineKey
-                              modifiedOn
-                            }
-                          }
-                        }
-                    """
-                    start_payload = {
-                        "id": subscription_id,
-                        "type": "start",
-                        "payload": {
-                            "data": json.dumps({"query": subscription_query}),
-                            "extensions": {
-                                "authorization": {
-                                    "host": self.host,
-                                    "Authorization": self.api_key,
-                                }
-                            }
-                        }
-                    }
+    async def _subscribe(self, q) -> None:
+        """Waits for ack and sends the subscription query."""
+        # 2. Wait for ack
+        while True:
+            message = await self.websocket.recv()
+            if json.loads(message).get("type") == "connection_ack":
+                break
 
-                    # 3. Listen for messages and handle the handshake
-                    while self._is_running:
-                        message = await websocket.recv()
-                        parsed_message = json.loads(message)
-                        msg_type = parsed_message.get("type")
+        # 3. Send start message
+        start_payload = {
+            "id": self.subscription_id,
+            "type": "start",
+            "payload": {
+                "data": json.dumps({"query": SUBSCRIPTION_QUERY}), # Query could be built from q
+                "extensions": {
+                    "authorization": {"host": self.host, "Authorization": self.api_key}
+                }
+            }
+        }
+        await self.websocket.send(json.dumps(start_payload))
 
-                        if msg_type == "connection_ack":
-                            print("Connection acknowledged. Sending subscription request...")
-                            await websocket.send(json.dumps(start_payload))
-                        
-                        elif msg_type == "start_ack":
-                            print("Subscription acknowledged. Listening for data...")
+    async def _incoming(self):
+        """Async generator that yields data messages from the WebSocket."""
+        if not self.websocket:
+            raise ConnectionError("WebSocket is not connected.")
 
-                        elif msg_type == "data":
-                            await self._process_message(message)
-                        
-                        elif msg_type == "ka":
-                            # Keep-alive message, ignore
-                            continue
+        async for message in self.websocket:
+            parsed = json.loads(message)
+            if parsed.get("type") == "data":
+                yield parsed
 
-                        elif msg_type == "error":
-                            print(f"Subscription error: {parsed_message}")
-                        
-                        else:
-                            print(f"Unhandled message type '{msg_type}': {parsed_message}")
+    def _parse_message(self, raw: Dict[str, Any]) -> List[FeedDelta]:
+        """Parses a raw 'data' message into FeedDelta objects."""
+        deltas = []
+        market_line_update = raw.get("payload", {}).get("data", {}).get("marketLineUpdate")
 
-            except websockets.ConnectionClosed as e:
-                print(f"Connection to {self.client_name} closed: {e}")
-                if not self._is_running:
-                    break
-                print("Reconnecting in 5 seconds...")
-                await asyncio.sleep(5)
-            except Exception as e:
-                print(f"An error occurred with {self.client_name}: {e}")
-                if not self._is_running:
-                    break
-                print("Attempting to reconnect in 5 seconds...")
-                await asyncio.sleep(5)
-
-    async def _process_message(self, message: str) -> None:
-        """Process and save incoming websocket message."""
-        try:
-            data = json.loads(message)
-            result = data.get("payload", {}).get("data", {}).get("marketLineUpdate")
+        if market_line_update:
+            delta = FeedDelta(
+                type=DeltaType.MARKET_UPDATE,
+                event_id=None,
+                payload=market_line_update,
+                received_at=None
+            )
+            deltas.append(delta)
             
-            if not result:
-                print(f"Received non-data message: {data}")
-                return
-
-            print(f"Received update for league {result.get('leagueId')} with {len(result.get('marketLines', []))} lines.")
-
-            # Ensure the directory exists
-            output_dir = "odds_data/unabated"
-            os.makedirs(output_dir, exist_ok=True)
-
-            # Save the raw data to a file
-            timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S_%f")
-            file_path = os.path.join(output_dir, f"unabated_data_{timestamp}.json")
-            
-            with open(file_path, 'w') as f:
-                json.dump(result, f, indent=4)
-            
-            self._notify(result)
-        
-        except Exception as e:
-            print(f"An error occurred during message processing: {e}")
+        return deltas

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, UTC
 import uuid
 from sqlalchemy import Boolean, DateTime, Column, BigInteger, Text, ForeignKey, func, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
@@ -15,8 +15,8 @@ class User(Base):
     telegram_chat_id = Column(BigInteger, unique=True, nullable=True, index=True)
     imessage_chat_id = Column(BigInteger, nullable=True)
     stripe_customer_id = Column(Text, unique=True, nullable=True)
-    created_at = Column(DateTime, default=lambda: datetime.utcnow())
-    updated_at = Column(DateTime, default=lambda: datetime.utcnow(), onupdate=func.now())
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC))
+    updated_at = Column(DateTime, default=lambda: datetime.now(UTC), onupdate=func.now())
 
     user_subscriptions = relationship(
         "UserSubscription", back_populates="user", cascade="all, delete-orphan"

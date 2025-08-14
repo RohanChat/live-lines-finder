@@ -1,0 +1,14 @@
+[
+  {
+    "sportId": 1,
+    "sportName": "Soccer"
+  },
+  {
+    "sportId": 10,
+    "sportName": "American Football"
+  },
+  {
+    "sportId": 20,
+    "sportName": "Basketball"
+  }
+]

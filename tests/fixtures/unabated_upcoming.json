@@ -1,0 +1,37 @@
+[
+  {
+    "id": 12345,
+    "game_time": "2024-09-06T00:20:00Z",
+    "display_name": "Kansas City Chiefs at Baltimore Ravens",
+    "participants": [
+      {
+        "id": 1,
+        "rotation_number": 101,
+        "team_id": 1,
+        "priority": 1,
+        "team": {
+          "id": 1,
+          "name": "Baltimore Ravens",
+          "location": "Baltimore",
+          "abbreviation": "BAL",
+          "primary_color": "241773",
+          "secondary_color": "000000"
+        }
+      },
+      {
+        "id": 2,
+        "rotation_number": 102,
+        "team_id": 2,
+        "priority": 0,
+        "team": {
+          "id": 2,
+          "name": "Kansas City Chiefs",
+          "location": "Kansas City",
+          "abbreviation": "KC",
+          "primary_color": "E31837",
+          "secondary_color": "FFB81C"
+        }
+      }
+    ]
+  }
+]

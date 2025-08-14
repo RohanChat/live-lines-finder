@@ -19,3 +19,4 @@ ngrok
 websockets
 openai
 supabase
+graphql-ws

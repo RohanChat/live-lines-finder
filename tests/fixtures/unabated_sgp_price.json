@@ -1,0 +1,17 @@
+{
+  "priceAmerican": 450,
+  "priceDecimal": 5.5,
+  "valid": true,
+  "legs": [
+    {
+      "market": "spread",
+      "outcome": "Kansas City Chiefs",
+      "line": -6.5
+    },
+    {
+      "market": "total",
+      "outcome": "Over",
+      "line": 52.5
+    }
+  ]
+}

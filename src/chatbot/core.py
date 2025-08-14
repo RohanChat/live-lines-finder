@@ -14,6 +14,11 @@ from database.models import UserSubscription
 from database.session import get_user_by_phone
 from messaging.base import BaseMessagingClient
 from feeds.base import OddsFeed
+from feeds.api.the_odds_api import TheOddsApiAdapter
+from feeds.api.unabated_api import UnabatedApiAdapter
+from feeds.api.oddspapi_api import OddsPapiApiAdapter
+from feeds.models import SportKey, MarketKey
+from chatbot.handlers import get_best_bets
 from analysis.base import AnalysisEngine
 
 logger = logging.getLogger(__name__)
@@ -67,14 +72,14 @@ class ChatbotCore:
     def __init__(
         self,
         platform: BaseMessagingClient,
-        feed: OddsFeed,
         analysis_engines: Optional[Sequence[AnalysisEngine]] = None,
         openai_api_key: Optional[str] = None,
         model: str = "o4-mini",
         product_id: Optional[str] = None
     ) -> None:
         self.platform = platform
-        self.feed = feed
+        provider_name = Config.ODDS_PROVIDER
+        self.feed = self.create_feed_adapter(provider_name)
         self.engines: list[AnalysisEngine] = list(analysis_engines or [])
         self.model = model
         self.product_id = product_id or Config.PRODUCT_IDS.first()
@@ -85,20 +90,19 @@ class ChatbotCore:
             self.openai_client = None
         logger.debug("ChatbotCore initialized with %d analysis engines", len(self.engines))
 
+    def create_feed_adapter(self, name: str) -> OddsFeed:
+        if name == "theoddsapi":
+            return TheOddsApiAdapter()
+        elif name == "unabated":
+            return UnabatedApiAdapter()
+        elif name == "oddspapi":
+            return OddsPapiApiAdapter()
+        else:
+            raise ValueError(f"Unknown odds provider: {name}")
+
     def add_engine(self, engine: AnalysisEngine) -> None:
         self.engines.append(engine)
         logger.debug("Added analysis engine: %s", engine.__class__.__name__)
-
-    def fetch_and_process_events(self) -> None:
-        """Fetch upcoming events and process them with all engines."""
-        events = self.feed.get_events_in_next_hours(24)
-        logger.info("Fetched %d upcoming events", len(events))
-        for event in events:
-            for engine in self.engines:
-                try:
-                    engine.process_odds_for_event(event)
-                except Exception:  # pragma: no cover - defensive
-                    logger.exception("Error processing event with %s", engine.__class__.__name__)
 
     # ------------------------------------------------------------------
     # OpenAI helpers
@@ -151,39 +155,15 @@ class ChatbotCore:
             name = msg.function_call.name
             args = json.loads(msg.function_call.arguments or "{}")
             
+            # This is a simplified mapping for now.
+            # A real implementation would need to parse the user's query
+            # to determine the sport.
             if name == "best_picks":
-                return self._generate_best_picks(hours=args.get("hours",24))
+                return get_best_bets(feed=self.feed, sport=SportKey.NFL, hours=args.get("hours", 24))
             if name == "build_parlay":
-                return self._generate_parlay(
-                    legs=args.get("legs",4), hours=args.get("hours",24)
-                )
+                return "Sorry, parlay building is not yet supported with the new feed system."
         # otherwise just return the LLM text
         return msg.content.strip() if msg.content else ""
-    
-    def _generate_best_picks(self, hours: int) -> str:
-        evs = self.feed.get_events_in_next_hours(hours)
-        lines = []
-        for ev in evs:
-            for engine in self.engines:
-                # This is where you invoke your engine
-                df = engine.process_odds_for_event(ev)
-                top = df.sort_values("arb_profit_margin", ascending=False).head(1)
-                for _, r in top.iterrows():
-                    lines.append(
-                        f"*{r.outcome_description}* `{r.arb_profit_margin:.2%}`\n"
-                        f"{r.over_link} | {r.under_link}"
-                    )
-        return "\n\n".join(lines) or "No arbitrage found."
-
-    def _generate_parlay(self, legs: int, hours: int) -> str:
-        evs = self.feed.get_events_in_next_hours(hours)[:legs]
-        picks = []
-        for ev in evs:
-            for engine in self.engines:
-                df = engine.process_odds_for_event(ev)
-                best = df.sort_values("sum_prob").iloc[0]
-                picks.append(f"{best.outcome_description}: {best.over_odds or best.under_odds}")
-        return "Your parlay:\n" + "\n".join(picks)
 
     def explain_line(self, line_desc: str) -> str:
         """Ask OpenAI to explain a betting line."""

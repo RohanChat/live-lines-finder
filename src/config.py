@@ -23,6 +23,7 @@ class Config:
     UNABATED_REALTIME_API_REGION = os.getenv('UNABATED_REALTIME_API_REGION')
     UNABATED_DATA_API_URL = os.getenv('UNABATED_DATA_API_URL')
     MOCK_CHAT_ID = os.getenv('MOCK_CHAT_ID')  # Default mock chat ID
+    ODDS_PROVIDER = os.getenv('ODDS_PROVIDER', 'theoddsapi') # Default provider
     
     # Stripe Configuration
     STRIPE_SECRET_KEY_LIVE = os.getenv('STRIPE_SECRET_KEY_LIVE')

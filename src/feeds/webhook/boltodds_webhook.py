@@ -1,103 +1,97 @@
+from __future__ import annotations
 import asyncio
 import json
-import os
-from datetime import datetime
 import websockets
+from typing import List, Dict, Any
 
-from ...config import Config
-from .webhook import WebhookFeed
+from src.config import Config
+from src.feeds.models import FeedDelta, DeltaType
+from src.feeds.webhook.webhook import WebhookFeed, UpdateHandler
 
+class BoltOddsWebhookAdapter(WebhookFeed):
+    """
+    Adapter for the BoltOdds WebSocket feed.
+    """
 
-class BoltOddsWebhook(WebhookFeed):
-    """Receive odds updates via the BoltOdds websocket feed."""
-
-    def __init__(self) -> None:
-        # The base class __init__ is called, but we don't need to pass params
-        # as BoltOdds uses a different authentication method.
+    def __init__(self, api_key: str | None = None):
         super().__init__()
-        
-        token = Config.BOLTODDS_TOKEN
+        token = api_key or Config.BOLTODDS_TOKEN
         if not token:
-            raise ValueError("BOLTODDS_API_KEY not found in environment variables.")
-        
+            raise ValueError("BoltOdds token is not configured.")
         self.wss_url = f"wss://spro.agency/api?key={token}"
-        self.client_name = "BoltOddsClient"
+        self.websocket = None
 
-    async def _subscribe(self) -> None:
+    async def _connect(self) -> None:
+        """Establishes the WebSocket connection."""
+        self.websocket = await websockets.connect(self.wss_url)
+
+    async def _disconnect(self) -> None:
+        """Closes the WebSocket connection."""
+        if self.websocket:
+            await self.websocket.close()
+            self.websocket = None
+
+    async def _subscribe(self, q) -> None:
+        """Sends a subscription message to the WebSocket."""
+        # The query 'q' would be used here to build the filter payload.
+        # For now, using a hardcoded example based on the old implementation.
+        subscribe_message = {
+            "action": "subscribe",
+            "filters": {
+                "sports": ["NBA", "MLB"],
+                "sportsbooks": ["draftkings", "betmgm"],
+                "markets": ["Moneyline", "Spread", "Total"]
+            }
+        }
+        await self.websocket.send(json.dumps(subscribe_message))
+
+    async def _incoming(self):
+        """Async generator that yields messages from the WebSocket."""
+        if not self.websocket:
+            raise ConnectionError("WebSocket is not connected.")
+        async for message in self.websocket:
+            yield message
+
+    def _parse_message(self, raw: str) -> List[FeedDelta]:
         """
-        Connect to the BoltOdds websocket, subscribe to data streams,
-        and process incoming messages.
+        Parses a raw message from BoltOdds into a list of FeedDelta objects.
+        This requires knowledge of the BoltOdds message structure.
+        We'll assume a structure for this example.
         """
-        print(f"Connecting to {self.client_name} at {self.wss_url.split('?')[0]}")
-        self._is_running = True
+        data = json.loads(raw)
+        deltas = []
+
+        # Example: Check for a full snapshot message
+        if data.get("type") == "snapshot" and "events" in data:
+            for event_data in data["events"]:
+                delta = FeedDelta(
+                    type=DeltaType.SNAPSHOT,
+                    event_id=event_data.get("id"),
+                    payload=event_data,
+                    received_at=None # This will be set by the base class
+                )
+                deltas.append(delta)
         
-        while self._is_running:
-            try:
-                async with websockets.connect(self.wss_url) as websocket:
-                    print(f"{self.client_name} connected successfully.")
-                    
-                    # On connection, BoltOdds may send an acknowledgement.
-                    ack_message = await websocket.recv()
-                    print(f"Received acknowledgement: {ack_message}")
+        # Example: Check for a single game update
+        elif data.get("type") == "game_update" and "game" in data:
+            game_data = data["game"]
+            delta = FeedDelta(
+                type=DeltaType.GAME_UPDATE,
+                event_id=game_data.get("id"),
+                payload=game_data,
+                received_at=None
+            )
+            deltas.append(delta)
 
-                    # Define the subscription filters
-                    subscribe_message = {
-                        "action": "subscribe",
-                        "filters": {
-                            "sports": ["NBA", "MLB"],
-                            "sportsbooks": ["draftkings", "betmgm"],
-                            "markets": ["Moneyline", "Spread", "Total"]
-                        }
-                    }
-                    await websocket.send(json.dumps(subscribe_message))
-                    print("Sent subscription request.")
+        # Example: Check for a single odds update
+        elif data.get("type") == "odds_update" and "odds" in data:
+            odds_data = data["odds"]
+            delta = FeedDelta(
+                type=DeltaType.PRICE_UPDATE,
+                event_id=odds_data.get("event_id"),
+                payload=odds_data,
+                received_at=None
+            )
+            deltas.append(delta)
 
-                    # Listen for incoming messages
-                    while self._is_running:
-                        message = await websocket.recv()
-                        await self._process_message(message)
-
-            except websockets.ConnectionClosed as e:
-                print(f"Connection to {self.client_name} closed: {e}")
-                if not self._is_running:
-                    break
-                print("Reconnecting in 5 seconds...")
-                await asyncio.sleep(5)
-            except Exception as e:
-                print(f"An error occurred with {self.client_name}: {e}")
-                if not self._is_running:
-                    break
-                print("Attempting to reconnect in 5 seconds...")
-                await asyncio.sleep(5)
-
-    async def _process_message(self, message: str) -> None:
-        """Process and save incoming websocket message."""
-        print(f"Received data: {message[:200]}...") # Print a snippet of the message
-
-        # Ensure the directory exists
-        output_dir = "odds_data/boltodds"
-        os.makedirs(output_dir, exist_ok=True)
-
-        # Save the raw data to a file
-        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S_%f")
-        file_path = os.path.join(output_dir, f"boltodds_data_{timestamp}.json")
-        
-        try:
-            # We save the raw message string directly
-            with open(file_path, 'w') as f:
-                f.write(message)
-            
-            # Also, let's parse it to notify any registered handlers with structured data
-            data = json.loads(message)
-            self._notify(data)
-        
-        except json.JSONDecodeError as e:
-            print(f"Failed to parse JSON message: {e}")
-            print(f"Raw message was saved to {file_path}")
-        except Exception as e:
-            print(f"An error occurred during message processing: {e}")
-
-    def stop(self) -> None:
-        """Stop the websocket subscription."""
-        print(f"Stopping {self.client_name} feed...")
-        self._is_running = False
+        return deltas
