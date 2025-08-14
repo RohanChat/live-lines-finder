@@ -1,8 +1,8 @@
 import argparse
-from config import Config
+from config.config import Config
 # from messaging.telegram.bot import TelegramBot
 from database import init_db
-from feeds.the_odds_api import TheOddsAPI
+from feeds.api.the_odds_api import TheOddsApiAdapter as TheOddsAPI
 from analysis.odds_processor import OddsProcessor
 from chatbot.core import ChatbotCore
 from messaging.mock_client.bot import MockMessagingClient
