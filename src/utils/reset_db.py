@@ -9,7 +9,7 @@ import os
 # Add src directory to path so we can import our modules
 sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
 
-from database import engine, Base
+from src.database import engine, Base
 from sqlalchemy import text
 import logging
 

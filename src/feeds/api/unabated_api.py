@@ -4,7 +4,7 @@ import requests
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 
-from src.config import Config
+from config.config import Config
 from src.feeds.base import OddsFeed
 from src.feeds.models import (
     SportKey,

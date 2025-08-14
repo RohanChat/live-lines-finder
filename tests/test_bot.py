@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch, call # Added call for che
 from sqlalchemy.orm import Session
 
 from src.messaging.telegram.bot import start_command, contact_handler
-from database import User
+from src.database import User
 
 from telegram import (
     Update,

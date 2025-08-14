@@ -4,7 +4,7 @@ from sqlalchemy.pool import StaticPool
 from sqlalchemy.orm import sessionmaker
 from unittest.mock import patch
 
-from database import Base, init_db as actual_init_db, get_db_session as actual_get_db_session, engine as actual_engine
+from src.database import Base, init_db as actual_init_db, get_db_session as actual_get_db_session, engine as actual_engine
 
 # Store the original engine and SessionLocal
 OriginalEngine = actual_engine

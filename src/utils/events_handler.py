@@ -10,9 +10,9 @@ from apscheduler.triggers.cron     import CronTrigger
 from apscheduler.triggers.date     import DateTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
-from config            import Config
-from feeds.api.the_odds_api     import TheOddsAPI
-from analysis.odds_processor    import OddsProcessor
+from config.config            import Config
+from src.feeds.api.the_odds_api     import TheOddsAPI
+from src.analysis.odds_processor    import OddsProcessor
 
 class EventsHandler:
     def __init__(

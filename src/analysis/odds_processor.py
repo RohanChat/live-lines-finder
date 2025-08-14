@@ -9,13 +9,13 @@ from scipy.interpolate import PchipInterpolator
 from scipy.stats import norm
 from scipy.optimize import minimize
 
-from utils.file_utils import load_file_with_string
-from config import Config
+from src.utils.file_utils import load_file_with_string
+from config.config import Config
 from itertools import zip_longest   # handles uneven list lengths
 from collections.abc import Iterable
 from itertools import product
-from feeds.base import OddsFeed
-from feeds.api.the_odds_api import TheOddsAPI
+from src.feeds.base import OddsFeed
+from src.feeds.api.the_odds_api import TheOddsApiAdapter as TheOddsAPI
 from .base import AnalysisEngine
 
 class OddsProcessor(AnalysisEngine):

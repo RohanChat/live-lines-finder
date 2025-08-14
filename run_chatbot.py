@@ -1,15 +1,16 @@
 import argparse
 from config.config import Config
-# from messaging.telegram.bot import TelegramBot
-from database import init_db
-from feeds.api.the_odds_api import TheOddsApiAdapter as TheOddsAPI
-from analysis.odds_processor import OddsProcessor
-from chatbot.core import ChatbotCore
-from messaging.mock_client.bot import MockMessagingClient
-from messaging.imessage.bot import iMessageBot 
+from src.feeds.models import SportKey
+from src.database import init_db
+from src.feeds.api.the_odds_api import TheOddsApiAdapter as TheOddsAPI
+from src.analysis.odds_processor import OddsProcessor
+from src.chatbot.core import ChatbotCore
+from src.messaging.mock_client.bot import MockMessagingClient
+from src.messaging.imessage.bot import iMessageBot 
+from src.feeds.query import FeedQuery
 import os
 
-from messaging.telegram.bot import TelegramBot
+from src.messaging.telegram.bot import TelegramBot
 
 def main():
     # telegram_bot = TelegramBot(token=Config.TELEGRAM_BOT_TOKEN)
@@ -68,17 +69,13 @@ def main():
     
     init_db()  # Ensure database is initialized before starting the chatbot
 
-    feed = TheOddsAPI()
-    todays_events = feed.get_events_between_hours(6, 24)
-    engines = [OddsProcessor(todays_events)]
     core = ChatbotCore(
       platform=platform,
-      feed=feed,
-      analysis_engines=engines,
       openai_api_key=Config.OPENAI_API_KEY,
       model=Config.OPENAI_MODEL,
       product_id=product_id
     )
+    core.create_feed_adapter("theoddsapi")
     core.start()
 
 if __name__=="__main__":

@@ -17,10 +17,10 @@ from telegram.ext import (
 )
 from sqlalchemy.exc import SQLAlchemyError
 
-from config import Config
-from database import get_db_session, User, init_db
-from utils.stripe_service import StripeService
-from utils.phone_utils import standardize_phone_number
+from config.config import Config
+from src.database import get_db_session, User, init_db
+from src.utils.stripe_service import StripeService
+from src.utils.phone_utils import standardize_phone_number
 from ..base import BaseMessagingClient
 
 

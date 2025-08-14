@@ -1,8 +1,8 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from config import Config
-from database import User
+from config.config import Config
+from src.database import User
 from .models import Base
 from supabase import create_client
 print(f"Attempting to connect to database at: {Config.DATABASE_URL}")

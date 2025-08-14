@@ -17,8 +17,8 @@ from datetime import datetime
 src_path = os.path.join(os.path.dirname(__file__), 'src')
 sys.path.insert(0, src_path)
 
-from config import Config
-from feeds.the_odds_api import TheOddsAPI
+from config.config import Config
+from src.feeds.the_odds_api import TheOddsAPI
 from analysis.odds_processor import OddsProcessor
 from notifier import TelegramNotifier
 import pandas as pd

@@ -6,7 +6,7 @@ import base64
 import uuid
 from typing import List, Dict, Any
 
-from src.config import Config
+from config.config import Config
 from src.feeds.models import FeedDelta, DeltaType
 from src.feeds.webhook.webhook import WebhookFeed
 

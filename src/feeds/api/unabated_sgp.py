@@ -2,7 +2,7 @@ from __future__ import annotations
 import requests
 from typing import Dict, Any
 
-from src.config import Config
+from config.config import Config
 from src.feeds.base import SgpSupport
 from src.feeds.models import SgpQuoteRequest, SgpQuoteResponse
 

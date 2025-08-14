@@ -8,18 +8,18 @@ from typing import Iterable, Sequence, Dict, Any, Optional
 
 import openai
 
-from config import Config
-from database import get_db_session
-from database.models import UserSubscription
-from database.session import get_user_by_phone
-from messaging.base import BaseMessagingClient
-from feeds.base import OddsFeed
-from feeds.api.the_odds_api import TheOddsApiAdapter
-from feeds.api.unabated_api import UnabatedApiAdapter
-from feeds.api.oddspapi_api import OddsPapiApiAdapter
-from feeds.models import SportKey, MarketKey
-from chatbot.handlers import get_best_bets
-from analysis.base import AnalysisEngine
+from config.config import Config
+from src.database import get_db_session
+from src.database.models import UserSubscription
+from src.database.session import get_user_by_phone
+from src.messaging.base import BaseMessagingClient
+from src.feeds.base import OddsFeed
+from src.feeds.api.the_odds_api import TheOddsApiAdapter
+from src.feeds.api.unabated_api import UnabatedApiAdapter
+from src.feeds.api.oddspapi_api import OddsPapiApiAdapter
+from src.feeds.models import SportKey, MarketKey
+from src.chatbot.handlers import get_best_bets
+from src.analysis.base import AnalysisEngine
 
 logger = logging.getLogger(__name__)
 

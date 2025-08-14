@@ -1,8 +1,8 @@
 from typing import Any, Callable, List, Tuple
 import asyncio
 
-from messaging.base import BaseMessagingClient
-from config import Config
+from src.messaging.base import BaseMessagingClient
+from config.config import Config
 
 
 class MockMessagingClient(BaseMessagingClient):

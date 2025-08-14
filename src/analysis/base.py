@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any, Dict
 
-from feeds.base import OddsFeed
+from src.feeds.base import OddsFeed
 
 class AnalysisEngine(ABC):
     """Abstract base class for modules that analyse odds data."""
