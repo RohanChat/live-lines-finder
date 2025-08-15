@@ -3,8 +3,8 @@ from unittest.mock import MagicMock, AsyncMock, patch, call # call might be need
 
 from sqlalchemy.orm import Session # For type hinting db_session
 
-from src.notifier import TelegramNotifier
-from src.database import User  # Model for creating test users
+from src.utils.notifier import TelegramNotifier
+from src.database.models import User
 # Config will be implicitly used by TelegramNotifier, conftest.py handles DB_URL aspect
 # For TELEGRAM_BOT_TOKEN, TelegramNotifier checks for it. We can patch Config if needed,
 # or ensure the test environment / .env has a dummy token.

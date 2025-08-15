@@ -13,13 +13,16 @@ from src.database import get_db_session
 from src.database.models import UserSubscription
 from src.database.session import get_user_by_phone
 from src.messaging.base import BaseMessagingClient
-from src.feeds.base import OddsFeed
+from src.feeds.base import OddsFeed, SgpSupport
 from src.feeds.api.the_odds_api import TheOddsApiAdapter
 from src.feeds.api.unabated_api import UnabatedApiAdapter
 from src.feeds.api.oddspapi_api import OddsPapiApiAdapter
-from src.feeds.models import SportKey, MarketKey
+from src.feeds.query import FeedQuery
+from src.feeds.api.unabated_sgp import UnabatedSgpAdapter
+from src.feeds.models import SportKey, MarketKey, SgpQuoteRequest, SgpLeg
 from src.chatbot.handlers import get_best_bets
 from src.analysis.base import AnalysisEngine
+from src.utils.mappings import map_sport_name_to_key
 
 logger = logging.getLogger(__name__)
 
@@ -111,23 +114,33 @@ class ChatbotCore:
         return [
             {
                 "name": "best_picks",
-                "description": "Return top arbitrage opportunities in the next X hours",
+                "description": "Return top arbitrage opportunities in the next X hours for a given sport",
                 "parameters": {
                     "type": "object",
                     "properties": {
+                        "sport": {"type": "string", "description": "The sport to get picks for, e.g., 'WNBA', 'NFL', 'Soccer'"},
                         "hours": {"type": "integer", "default": 24}
-                    }
+                    },
+                    "required": ["sport"]
                 },
             },
             {
                 "name": "build_parlay",
-                "description": "Build a high-value parlay with N legs over the next X hours",
+                "description": "Build a high-value parlay or Same Game Parlay (SGP).",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "legs":  {"type": "integer", "default": 4},
-                        "hours": {"type": "integer", "default": 24},
-                    }
+                        "sport": {"type": "string", "description": "The sport to build the parlay for, e.g., 'NBA', 'NFL'."},
+                        "legs": {"type": "integer", "description": "The number of legs for the parlay.", "default": 3},
+                        "hours": {"type": "integer", "description": "Timeframe in hours to look for games.", "default": 24},
+                        "is_sgp": {"type": "boolean", "description": "Whether this should be a Same Game Parlay (SGP).", "default": False},
+                        "markets": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Optional list of markets to include (e.g., 'h2h', 'spreads', 'player_points')."
+                        }
+                    },
+                    "required": ["sport", "legs"]
                 },
             },
         ]
@@ -159,9 +172,79 @@ class ChatbotCore:
             # A real implementation would need to parse the user's query
             # to determine the sport.
             if name == "best_picks":
-                return get_best_bets(feed=self.feed, sport=SportKey.NFL, hours=args.get("hours", 24))
+                sport_name = args.get("sport")
+                if not sport_name:
+                    return "Please specify a sport when asking for best picks."
+
+                sport_key = map_sport_name_to_key(sport_name)
+                if not sport_key:
+                    return f"Sorry, I don't recognize the sport '{sport_name}'. Please try a common name like 'NFL', 'NBA', or 'Soccer'."
+
+                return get_best_bets(
+                    feed=self.feed,
+                    sport=sport_key,
+                    hours=args.get("hours", 24),
+                    analysis_engines=self.engines,
+                    chatbot=self
+                )
             if name == "build_parlay":
-                return "Sorry, parlay building is not yet supported with the new feed system."
+                sport_name = args.get("sport")
+                num_legs = args.get("legs", 3)
+                is_sgp = args.get("is_sgp", False)
+
+                if not sport_name:
+                    return "Please specify a sport to build a parlay."
+
+                sport_key = map_sport_name_to_key(sport_name)
+                if not sport_key:
+                    return f"Sorry, I don't recognize the sport '{sport_name}'."
+
+                if is_sgp:
+                    # For SGP, we need a single event. Let's find one.
+                    # A real implementation would be more robust here.
+                    try:
+                        events = self.feed.get_odds(FeedQuery(sport=sport_key, markets=[MarketKey.H2H]))
+                        if not events:
+                            return f"Couldn't find an upcoming event for {sport_name} to build an SGP."
+                        target_event = events[0]
+
+                        # Use Unabated SGP adapter
+                        sgp_adapter = UnabatedSgpAdapter()
+
+                        # This is a simplified leg creation. A real implementation would need
+                        # to get available markets for the event and map them correctly.
+                        # For now, we create some plausible legs as a demo.
+                        legs = [
+                            SgpLeg(event_id=target_event.event.event_id, market_key=MarketKey.H2H, outcome_key=target_event.event.competitors[0].name),
+                            SgpLeg(event_id=target_event.event.event_id, market_key=MarketKey.TOTAL, outcome_key="Over", line=220.5),
+                        ]
+
+                        req = SgpQuoteRequest(bookmaker="draftkings", legs=legs[:num_legs])
+
+                        # Get deeplink and price
+                        response = sgp_adapter.deeplink_sgp(req)
+
+                        leg_descs = [f"- {l.market_key.value}: {l.outcome_key} {l.line or ''}" for l in req.legs]
+
+                        return (
+                            f"Here is a {len(req.legs)}-leg SGP suggestion for the "
+                            f"{target_event.event.competitors[0].name} vs {target_event.event.competitors[1].name} game:\n\n"
+                            + "\n".join(leg_descs)
+                            + f"\n\nClick here to build it: [Bet Slip]({response.deeplink_url})"
+                        )
+
+                    except Exception as e:
+                        logger.error(f"SGP construction failed: {e}")
+                        return "Sorry, I couldn't build a Same Game Parlay right now. This feature is in beta."
+
+                else:
+                    # For a standard parlay, we'll just suggest combining top bets.
+                    # A more advanced version would ensure legs are from different games.
+                    return (
+                        "Building multi-game parlays is complex. A great strategy is to combine "
+                        "several high-value single bets. You can ask me for 'best bets' for different "
+                        "sports and combine them on your favorite sportsbook!"
+                    )
         # otherwise just return the LLM text
         return msg.content.strip() if msg.content else ""
 

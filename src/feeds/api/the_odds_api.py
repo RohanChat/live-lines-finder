@@ -94,7 +94,7 @@ class TheOddsApiAdapter(OddsFeed):
         raw_events = self._make_request(f"sports/{sport_key_str}/events", params)
         return [self._normalize_event(e) for e in raw_events]
 
-    def get_odds(self, q: FeedQuery) -> List[EventOdds]:
+    def get_odds(self, q: FeedQuery, include_deeplinks: bool = False) -> List[EventOdds]:
         if not q.sport:
             raise ValueError("A sport must be specified for get_odds.")
 
@@ -113,11 +113,14 @@ class TheOddsApiAdapter(OddsFeed):
             reverse_market_map = {v: k for k, v in self.MARKET_MAP.items()}
             params["markets"] = ",".join([reverse_market_map[m] for m in q.markets])
 
+        if include_deeplinks:
+            params["includeLinks"] = "true"
+
         raw_odds_data = self._make_request(f"sports/{sport_key_str}/odds", params)
         return [self._normalize_event_odds(raw_event, raw_event, q) for raw_event in raw_odds_data]
 
 
-    def get_event_odds(self, event_id: str, q: FeedQuery) -> EventOdds:
+    def get_event_odds(self, event_id: str, q: FeedQuery, include_deeplinks: bool = False) -> EventOdds:
         if not q.sport:
             raise ValueError("A sport must be specified for get_event_odds.")
 
@@ -130,6 +133,9 @@ class TheOddsApiAdapter(OddsFeed):
             "oddsFormat": "american",
             "dateFormat": "iso",
         }
+
+        if include_deeplinks:
+            params["includeLinks"] = "true"
 
         raw_event_with_odds = self._make_request(f"sports/{sport_key_str}/events/{event_id}/odds", params)
         return self._normalize_event_odds(raw_event_with_odds, raw_event_with_odds, q)
@@ -177,6 +183,7 @@ class TheOddsApiAdapter(OddsFeed):
                         line=outcome.get("point"),
                         bookmaker_key=book_key,
                         last_update=datetime.fromisoformat(market["last_update"].replace("Z", "+00:00")),
+                        link=bookmaker.get("deep_link_url") # Extract deeplink
                     )
                     markets[market_key_enum].outcomes.append(outcome_price)
 
