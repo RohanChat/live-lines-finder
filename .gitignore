@@ -12,3 +12,4 @@ supabase/
 *.sqlite3
 mappings/
 .vscode/
+tests/

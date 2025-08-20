@@ -1,26 +1,38 @@
 {
   "LEAGUE_MAP": {
-    "nfl": 1,
-    "ncaaf": 2,
-    "nba": 3,
-    "ncaab": 4,
-    "mlb": 5,
-    "nhl": 6,
-    "wnba": 7
+    "nfl": "nfl",
+    "ncaaf": "ncaaf", 
+    "nba": "nba",
+    "ncaab": "ncaab",
+    "mlb": "mlb",
+    "nhl": "nhl",
+    "wnba": "wnba"
   },
   "SPORT_MAP": {
     "nfl": "americanfootball_nfl",
-    "ncaaf": "americanfootball_ncaa",
+    "ncaaf": "americanfootball_ncaaf", 
     "nba": "basketball_nba",
-    "ncaab": "basketball_ncaa",
+    "ncaab": "basketball_ncaab",
     "mlb": "baseball_mlb",
     "nhl": "icehockey_nhl",
     "wnba": "basketball_wnba"
   },
   "MARKET_TYPE_MAP": {
-    "moneyline": "h2h",
-    "spread": "spread",
-    "total": "total",
-    "team_total": "team_total"
+    "1": "h2h",
+    "2": "spread", 
+    "3": "total",
+    "4": "team_total"
+  },
+  "BET_TYPE_TO_NAME": {
+    "1": "Moneyline",
+    "2": "Spread",
+    "3": "Total", 
+    "4": "Team Total"
+  },
+  "REVERSE_MARKET_MAP": {
+    "h2h": "1",
+    "spread": "2",
+    "total": "3", 
+    "team_total": "4"
   }
 }

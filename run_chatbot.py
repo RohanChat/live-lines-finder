@@ -71,11 +71,11 @@ def main():
 
     core = ChatbotCore(
       platform=platform,
+      provider_name="unabated",
       openai_api_key=Config.OPENAI_API_KEY,
       model=Config.OPENAI_MODEL,
       product_id=product_id
     )
-    core.create_feed_adapter("theoddsapi")
     core.start()
 
 if __name__=="__main__":
