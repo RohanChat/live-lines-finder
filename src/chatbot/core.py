@@ -17,7 +17,6 @@ from src.messaging.base import BaseMessagingClient
 from src.feeds.base import OddsFeed
 from src.feeds.api.the_odds_api import TheOddsApiAdapter
 from src.feeds.api.unabated_api import UnabatedApiAdapter
-from src.feeds.api.oddspapi_api import OddsPapiApiAdapter
 from src.feeds.models import SportKey, MarketType, EventOdds
 from src.chatbot.handlers import get_best_bets
 from src.analysis.base import AnalysisEngine
@@ -100,8 +99,6 @@ class ChatbotCore:
             return TheOddsApiAdapter()
         elif name == "unabated":
             return UnabatedApiAdapter()
-        elif name == "oddspapi":
-            return OddsPapiApiAdapter()
         else:
             raise ValueError(f"Unknown odds provider: {name}")
 
