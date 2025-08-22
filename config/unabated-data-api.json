@@ -1,0 +1,2015 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "Unabated Data API",
+    "description": "Unabated Market Data Endpoints",
+    "version": "v1"
+  },
+  "paths": {
+    "/bettype": {
+      "get": {
+        "tags": [
+          "BetType"
+        ],
+        "parameters": [
+          {
+            "name": "changedSince",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-API-Version",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "api-version",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponseOfListOfBetType"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponseOfListOfBetType"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponseOfListOfBetType"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/deeplink": {
+      "get": {
+        "tags": [
+          "Deeplink"
+        ],
+        "summary": "Generate a deeplink URL for the provided market lines.",
+        "parameters": [
+          {
+            "name": "ids",
+            "in": "query",
+            "description": "Comma separated market line ids.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "points",
+            "in": "query",
+            "description": "Comma separated list of points.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "description": "User state code.",
+            "schema": {
+              "type": "string",
+              "default": ""
+            }
+          },
+          {
+            "name": "isMobileDevice",
+            "in": "query",
+            "description": "Indicates mobile environment.",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          {
+            "name": "X-API-Version",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "api-version",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Returns the deeplink or details"
+          },
+          "500": {
+            "description": "Generation failed"
+          }
+        }
+      }
+    },
+    "/deeplink/sgp": {
+      "get": {
+        "tags": [
+          "Deeplink"
+        ],
+        "summary": "Execute a same game parlay request.",
+        "parameters": [
+          {
+            "name": "ids",
+            "in": "query",
+            "description": "Market line ids.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "points",
+            "in": "query",
+            "description": "Optional points values.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "description": "User state code.",
+            "schema": {
+              "type": "string",
+              "default": ""
+            }
+          },
+          {
+            "name": "isMobileDevice",
+            "in": "query",
+            "description": "Indicates mobile environment.",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          {
+            "name": "includeDetails",
+            "in": "query",
+            "description": "Include detailed results.",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          {
+            "name": "X-API-Version",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "api-version",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Returns SGP details"
+          },
+          "500": {
+            "description": "Request failed"
+          }
+        }
+      }
+    },
+    "/deeplink/sgp/price": {
+      "get": {
+        "tags": [
+          "Deeplink"
+        ],
+        "summary": "Price shop a same game parlay request across books.",
+        "parameters": [
+          {
+            "name": "ids",
+            "in": "query",
+            "description": "Market line ids.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "points",
+            "in": "query",
+            "description": "Optional points values.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "description": "User state code.",
+            "schema": {
+              "type": "string",
+              "default": ""
+            }
+          },
+          {
+            "name": "isMobileDevice",
+            "in": "query",
+            "description": "Indicates mobile environment.",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          {
+            "name": "includeDetails",
+            "in": "query",
+            "description": "Include detailed results.",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          {
+            "name": "books",
+            "in": "query",
+            "description": "Comma separated book identifiers.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-API-Version",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "api-version",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Returns price shop result"
+          },
+          "500": {
+            "description": "Request failed"
+          }
+        }
+      }
+    },
+    "/event/{league}/upcoming": {
+      "get": {
+        "tags": [
+          "Event"
+        ],
+        "parameters": [
+          {
+            "name": "league",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "changedSince",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-API-Version",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "api-version",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponseOfListOfEvent"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponseOfListOfEvent"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponseOfListOfEvent"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/market/{league}/{marketType}/odds": {
+      "get": {
+        "tags": [
+          "MarketData"
+        ],
+        "summary": "Get Odds",
+        "parameters": [
+          {
+            "name": "league",
+            "in": "path",
+            "description": "League identifier (e.g., mlb, nfl, cbb, nba, nhl, etc.)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "marketType",
+            "in": "path",
+            "description": "Type of market to return (straight, futures, props)",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/MarketType"
+            }
+          },
+          {
+            "name": "X-API-Version",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "api-version",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Returns the odds data",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponseOfOdds"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponseOfOdds"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponseOfOdds"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid league or market type",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized access",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/market/{league}/{marketType}/people": {
+      "get": {
+        "tags": [
+          "MarketData"
+        ],
+        "summary": "Get People",
+        "parameters": [
+          {
+            "name": "league",
+            "in": "path",
+            "description": "League identifier (e.g., mlb, nfl, cbb, nba, nhl, etc.)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "marketType",
+            "in": "path",
+            "description": "Type of market (straight, futures, props)",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/MarketType"
+            }
+          },
+          {
+            "name": "X-API-Version",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "api-version",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Returns the people data",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponseOfDictionaryOfInt64Person"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponseOfDictionaryOfInt64Person"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponseOfDictionaryOfInt64Person"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid league or market type",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized access",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/market/{league}/{marketType}/sources": {
+      "get": {
+        "tags": [
+          "MarketData"
+        ],
+        "summary": "Get Market Sources",
+        "parameters": [
+          {
+            "name": "league",
+            "in": "path",
+            "description": "League identifier (e.g., mlb, nfl, cbb, nba, nhl, etc.)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "marketType",
+            "in": "path",
+            "description": "Type of market (straight, futures, props)",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/MarketType"
+            }
+          },
+          {
+            "name": "X-API-Version",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "api-version",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Returns the market sources",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponseOfListOfMarketSource"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponseOfListOfMarketSource"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponseOfListOfMarketSource"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid league or market type",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized access",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/market/{league}/{marketType}/teams": {
+      "get": {
+        "tags": [
+          "MarketData"
+        ],
+        "summary": "Get Teams",
+        "parameters": [
+          {
+            "name": "league",
+            "in": "path",
+            "description": "League identifier (e.g., mlb, nfl, cbb, nba, nhl, etc.)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "marketType",
+            "in": "path",
+            "description": "Type of market (straight, futures, props)",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/MarketType"
+            }
+          },
+          {
+            "name": "X-API-Version",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "api-version",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Returns the teams data",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponseOfDictionaryOfInt64Team"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponseOfDictionaryOfInt64Team"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponseOfDictionaryOfInt64Team"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid league or market type",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized access",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/player/{league}": {
+      "get": {
+        "tags": [
+          "Player"
+        ],
+        "parameters": [
+          {
+            "name": "league",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "changedSince",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-API-Version",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "api-version",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponseOfListOfPerson"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponseOfListOfPerson"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponseOfListOfPerson"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/team/{league}": {
+      "get": {
+        "tags": [
+          "Team"
+        ],
+        "parameters": [
+          {
+            "name": "league",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "changedSince",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-API-Version",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "api-version",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponseOfListOfTeam"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponseOfListOfTeam"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponseOfListOfTeam"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ApiResponseOfDictionaryOfInt64Person": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Person"
+            },
+            "description": "Dictionary with Int64 keys and PublicPerson values",
+            "nullable": true,
+            "example": {
+              "882572": {
+                "id": 882572,
+                "headshotUrl": "players/nba/882572.png",
+                "firstName": "Pascal",
+                "lastName": "Siakam",
+                "jerseyNumber": "43",
+                "country": "Douala,, CMR",
+                "priorityType": 0,
+                "height": 80,
+                "weight": 245,
+                "position": "F",
+                "birthDate": "1994-04-02T00:00:00Z",
+                "leagueId": 3
+              },
+              "883170": {
+                "id": 883170,
+                "headshotUrl": "players/nba/883170.png",
+                "firstName": "Aaron",
+                "lastName": "Nesmith",
+                "jerseyNumber": "23",
+                "country": "Charleston, SC, USA",
+                "priorityType": 0,
+                "height": 78,
+                "weight": 215,
+                "position": "G-F",
+                "birthDate": "1999-10-16T00:00:00Z",
+                "leagueId": 3
+              },
+              "883262": {
+                "id": 883262,
+                "headshotUrl": "players/nba/883262.png",
+                "firstName": "Shai",
+                "lastName": "Gilgeous-Alexander",
+                "jerseyNumber": "2",
+                "country": "Toronto, ON, CAN",
+                "priorityType": 0,
+                "height": 78,
+                "weight": 195,
+                "position": "G",
+                "birthDate": "1998-07-12T00:00:00Z",
+                "leagueId": 3
+              }
+            }
+          },
+          "success": {
+            "type": "boolean"
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "ApiResponseOfDictionaryOfInt64Team": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Team"
+            },
+            "description": "Dictionary with Int64 keys and PublicTeam values",
+            "nullable": true,
+            "example": {
+              "68": {
+                "id": 68,
+                "name": "Chicago Bulls",
+                "abbreviation": "CHI",
+                "logoUrl": "https://assets.unabated.com/teams/logos/nba/chi.svg",
+                "leagueId": 3
+              },
+              "84": {
+                "id": 84,
+                "name": "Oklahoma City Thunder",
+                "abbreviation": "OKC",
+                "logoUrl": "https://assets.unabated.com/teams/logos/nba/okc.svg",
+                "leagueId": 3
+              }
+            }
+          },
+          "success": {
+            "type": "boolean"
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "ApiResponseOfListOfBetType": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BetType"
+            },
+            "nullable": true
+          },
+          "success": {
+            "type": "boolean"
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "ApiResponseOfListOfEvent": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Event"
+            },
+            "nullable": true
+          },
+          "success": {
+            "type": "boolean"
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "ApiResponseOfListOfMarketSource": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MarketSource"
+            },
+            "nullable": true,
+            "example": [
+              {
+                "id": 1,
+                "name": "DraftKings",
+                "logoUrl": "https://assets.unabated.com/sportsbooks/logos/draft-kings.svg",
+                "thumbnailUrl": "https://assets.unabated.com/sportsbooks/thumbnails/draft-kings.webp",
+                "siteUrl": "https://sportsbook.draftkings.com/",
+                "isActive": true,
+                "statusId": 1,
+                "propsStatusId": 1,
+                "futuresStatusId": 1
+              },
+              {
+                "id": 4,
+                "name": "BetMGM",
+                "logoUrl": "https://assets.unabated.com/sportsbooks/logos/bet-mgm.svg",
+                "thumbnailUrl": "https://assets.unabated.com/sportsbooks/thumbnails/bet-mgm.webp",
+                "siteUrl": "https://sports.betmgm.com/en/sports",
+                "isActive": true,
+                "statusId": 3,
+                "propsStatusId": 1,
+                "futuresStatusId": 3
+              }
+            ]
+          },
+          "success": {
+            "type": "boolean"
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "ApiResponseOfListOfPerson": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Person"
+            },
+            "nullable": true
+          },
+          "success": {
+            "type": "boolean"
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "ApiResponseOfListOfTeam": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Team"
+            },
+            "nullable": true
+          },
+          "success": {
+            "type": "boolean"
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "ApiResponseOfOdds": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/Odds"
+          },
+          "success": {
+            "type": "boolean"
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "BetType": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string",
+            "nullable": true
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "betOn": {
+            "type": "string",
+            "nullable": true
+          },
+          "sides": {
+            "type": "string",
+            "nullable": true
+          },
+          "canDraw": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "hasPoints": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "active": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "selectionCountType": {
+            "type": "string",
+            "nullable": true
+          },
+          "betRange": {
+            "type": "string",
+            "nullable": true
+          },
+          "betTypeId": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "isFuture": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "Event": {
+        "type": "object",
+        "properties": {
+          "eventId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "leagueId": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "statusId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "eventStart": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "eventEnd": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "gameClock": {
+            "type": "string",
+            "nullable": true
+          },
+          "periodTypeId": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "overtimeNumber": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "tournamentId": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "name": {
+            "type": "string",
+            "nullable": true
+          },
+          "eventTeams": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EventTeam"
+            },
+            "nullable": true
+          },
+          "partnerEventData": {
+            "$ref": "#/components/schemas/PartnerEventData"
+          }
+        },
+        "additionalProperties": false
+      },
+      "EventTeam": {
+        "type": "object",
+        "properties": {
+          "teamId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "rotationNumber": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          },
+          "score": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          },
+          "sideIndex": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "name": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "FanduelPartnerEventData": {
+        "type": "object",
+        "properties": {
+          "eventId": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "FanduelPartnerOddsData": {
+        "type": "object",
+        "properties": {
+          "marketId": {
+            "type": "string",
+            "nullable": true
+          },
+          "selectionId": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "FanduelPartnerPlayerData": {
+        "type": "object",
+        "properties": {
+          "playerId": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "FanduelPartnerTeamData": {
+        "type": "object",
+        "properties": {
+          "teamId": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "MarketAlternateLine": {
+        "type": "object",
+        "properties": {
+          "marketId": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          },
+          "marketLineId": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          },
+          "marketSourceId": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          },
+          "points": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "price": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "sourcePrice": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "sourceFormat": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "alternateNumber": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "statusId": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "sequenceNumber": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          },
+          "edge": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "disabled": {
+            "type": "boolean"
+          },
+          "modifiedOn": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "MarketLine": {
+        "type": "object",
+        "properties": {
+          "marketId": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          },
+          "marketLineId": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          },
+          "marketSourceId": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          },
+          "points": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "price": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "sourcePrice": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "sourceFormat": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "statusId": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "sequenceNumber": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          },
+          "edge": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "bestAltPrice": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "bestAltPoints": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "bestAltEdge": {
+            "type": "number",
+            "format": "double",
+            "nullable": true
+          },
+          "alternateLines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MarketAlternateLine"
+            },
+            "nullable": true
+          },
+          "disabled": {
+            "type": "boolean"
+          },
+          "marketLineKey": {
+            "type": "string",
+            "nullable": true
+          },
+          "modifiedOn": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "partnerOddsData": {
+            "$ref": "#/components/schemas/PartnerOddsData"
+          }
+        },
+        "additionalProperties": false
+      },
+      "MarketLineGroup": {
+        "type": "object",
+        "properties": {
+          "eventId": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          },
+          "isLive": {
+            "type": "boolean"
+          },
+          "eventStart": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "eventEnd": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "statusId": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "betTypeId": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "betSubType": {
+            "type": "string",
+            "nullable": true
+          },
+          "gameClock": {
+            "type": "string",
+            "nullable": true
+          },
+          "overtimeNumber": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "eventName": {
+            "type": "string",
+            "nullable": true
+          },
+          "playerPosition": {
+            "type": "string",
+            "nullable": true
+          },
+          "tournamentName": {
+            "type": "string",
+            "nullable": true
+          },
+          "key": {
+            "type": "string",
+            "nullable": true
+          },
+          "eventTeams": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/EventTeam"
+            },
+            "description": "Dictionary with Int32 keys and PublicEventTeam values",
+            "nullable": true
+          },
+          "sides": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/MarketLineGroupSide"
+            },
+            "description": "Dictionary with String keys and PublicMarketLineGroupSide values",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "MarketLineGroupSide": {
+        "type": "object",
+        "properties": {
+          "sideIndex": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "sideName": {
+            "type": "string",
+            "nullable": true
+          },
+          "personId": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          },
+          "teamId": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          },
+          "marketSourceLines": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/MarketLine"
+            },
+            "description": "Dictionary with String keys and PublicMarketLine values",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "MarketSource": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string",
+            "nullable": true
+          },
+          "logoUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "thumbnailUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "siteUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "statusId": {
+            "$ref": "#/components/schemas/MarketSourceStatusType"
+          },
+          "propsStatusId": {
+            "$ref": "#/components/schemas/MarketSourceStatusType"
+          },
+          "futuresStatusId": {
+            "$ref": "#/components/schemas/MarketSourceStatusType"
+          },
+          "modifiedOn": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
+      },
+      "MarketSourceStatusType": {
+        "enum": [
+          "HighFrequency",
+          "LowFrequency",
+          "Offline"
+        ],
+        "type": "string"
+      },
+      "MarketType": {
+        "enum": [
+          "straight",
+          "futures",
+          "props"
+        ],
+        "type": "string"
+      },
+      "Odds": {
+        "type": "object",
+        "properties": {
+          "odds": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/OddsLeague"
+            },
+            "description": "Dictionary with String keys and PublicOddsLeague values",
+            "nullable": true
+          },
+          "lastUpdated": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "additionalProperties": false,
+        "example": {
+          "odds": {
+            "nba": {
+              "leagueId": 3,
+              "periodTypes": {
+                "game": {
+                  "periodTypeId": 1,
+                  "pregame": {
+                    "eid940356:bt72:bst0:pt1:pregame": {
+                      "eventId": 940356,
+                      "isLive": false,
+                      "eventStart": "2025-06-05T16:30:00Z",
+                      "eventEnd": "2025-06-05T19:30:00Z",
+                      "statusId": 1,
+                      "betTypeId": 71,
+                      "betSubType": "",
+                      "gameClock": "00:00",
+                      "overtimeNumber": 0,
+                      "eventName": "Thunder Oklahoma City OKC @ Pacers Indiana IND",
+                      "playerPosition": "",
+                      "tournamentName": "",
+                      "eventTeams": {
+                        "0": {
+                          "teamId": 75,
+                          "rotationNumber": 501,
+                          "sideIndex": 0,
+                          "score": 0
+                        },
+                        "1": {
+                          "teamId": 84,
+                          "rotationNumber": 502,
+                          "sideIndex": 0,
+                          "score": 0
+                        }
+                      },
+                      "sides": {
+                        "si0:tid75": {
+                          "sideIndex": 0,
+                          "sideName": "",
+                          "teamId": 75,
+                          "personId": null,
+                          "marketSourceLines": {
+                            "91": {
+                              "marketId": 43907422,
+                              "marketLineId": 3181318560,
+                              "marketSourceId": 91,
+                              "points": 230.5,
+                              "price": -110,
+                              "sourcePrice": -110,
+                              "sourceFormat": 1,
+                              "statusId": 1,
+                              "sequenceNumber": 1749141120194,
+                              "edge": -0.0642,
+                              "bestAltPrice": -110,
+                              "bestAltPoints": 230.5,
+                              "bestAltEdge": -0.0842,
+                              "disabled": false,
+                              "marketLineKey": "",
+                              "modifiedOn": "2025-06-05T16:32:07.592989Z",
+                              "alternateLines": [
+                                {
+                                  "marketId": 43907422,
+                                  "marketLineId": 3181318560,
+                                  "marketSourceId": 91,
+                                  "alternateNumber": 1,
+                                  "points": 231.5,
+                                  "price": -120,
+                                  "sourcePrice": -120,
+                                  "statusId": 1,
+                                  "sequenceNumber": 1749141120194,
+                                  "edge": -0.0842,
+                                  "modifiedOn": "2025-06-05T16:32:07.592989Z"
+                                },
+                                {
+                                  "marketId": 43907422,
+                                  "marketLineId": 3181318560,
+                                  "marketSourceId": 91,
+                                  "alternateNumber": 1,
+                                  "points": 229.5,
+                                  "price": -100,
+                                  "sourcePrice": -100,
+                                  "sourceFormat": 1,
+                                  "statusId": 1,
+                                  "sequenceNumber": 1749141120194,
+                                  "edge": -0.042,
+                                  "modifiedOn": "2025-06-05T16:32:07.592989Z"
+                                }
+                              ]
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "lastUpdated": 1734567890
+        }
+      },
+      "OddsLeague": {
+        "type": "object",
+        "properties": {
+          "leagueId": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "periodTypes": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/OddsPeriodType"
+            },
+            "description": "Dictionary with String keys and PublicOddsPeriodType values",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "OddsPeriodType": {
+        "type": "object",
+        "properties": {
+          "periodTypeId": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "pregame": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/MarketLineGroup"
+            },
+            "description": "Dictionary with String keys and PublicMarketLineGroup values",
+            "nullable": true
+          },
+          "live": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/MarketLineGroup"
+            },
+            "description": "Dictionary with String keys and PublicMarketLineGroup values",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "PartnerEventData": {
+        "type": "object",
+        "properties": {
+          "fanduel": {
+            "$ref": "#/components/schemas/FanduelPartnerEventData"
+          }
+        },
+        "additionalProperties": false
+      },
+      "PartnerOddsData": {
+        "type": "object",
+        "properties": {
+          "fanduel": {
+            "$ref": "#/components/schemas/FanduelPartnerOddsData"
+          }
+        },
+        "additionalProperties": false
+      },
+      "PartnerPlayerData": {
+        "type": "object",
+        "properties": {
+          "fanduel": {
+            "$ref": "#/components/schemas/FanduelPartnerPlayerData"
+          }
+        },
+        "additionalProperties": false
+      },
+      "PartnerTeamData": {
+        "type": "object",
+        "properties": {
+          "fanduel": {
+            "$ref": "#/components/schemas/FanduelPartnerTeamData"
+          }
+        },
+        "additionalProperties": false
+      },
+      "Person": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "headshotUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "firstName": {
+            "type": "string",
+            "nullable": true
+          },
+          "lastName": {
+            "type": "string",
+            "nullable": true
+          },
+          "preferredName": {
+            "type": "string",
+            "nullable": true
+          },
+          "jerseyNumber": {
+            "type": "string",
+            "nullable": true
+          },
+          "country": {
+            "type": "string",
+            "nullable": true
+          },
+          "priorityType": {
+            "$ref": "#/components/schemas/PersonPriorityType"
+          },
+          "height": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "weight": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "position": {
+            "type": "string",
+            "nullable": true
+          },
+          "birthDate": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "leagueId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "partnerPlayerData": {
+            "$ref": "#/components/schemas/PartnerPlayerData"
+          }
+        },
+        "additionalProperties": false
+      },
+      "PersonPriorityType": {
+        "enum": [
+          "low",
+          "normal",
+          "high",
+          "featured"
+        ],
+        "type": "string"
+      },
+      "ProblemDetails": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "nullable": true
+          },
+          "title": {
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "detail": {
+            "type": "string",
+            "nullable": true
+          },
+          "instance": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": {}
+      },
+      "Team": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string",
+            "nullable": true
+          },
+          "abbreviation": {
+            "type": "string",
+            "nullable": true
+          },
+          "logoUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "leagueId": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "divisionId": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "divisionAbbreviation": {
+            "type": "string",
+            "nullable": true
+          },
+          "conferenceAbbreviation": {
+            "type": "string",
+            "nullable": true
+          },
+          "partnerTeamData": {
+            "$ref": "#/components/schemas/PartnerTeamData"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "securitySchemes": {
+      "ApiKeyAuth": {
+        "type": "apiKey",
+        "name": "X-Api-Key",
+        "in": "header"
+      }
+    }
+  },
+  "security": [
+    {
+      "ApiKeyAuth": []
+    }
+  ]
+}

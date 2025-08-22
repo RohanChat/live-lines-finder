@@ -18,7 +18,7 @@ from src.feeds.base import OddsFeed
 from src.feeds.api.the_odds_api import TheOddsApiAdapter
 from src.feeds.api.unabated_api import UnabatedApiAdapter
 from src.feeds.api.oddspapi_api import OddsPapiApiAdapter
-from src.feeds.models import SportKey, MarketKey, EventOdds
+from src.feeds.models import SportKey, MarketType, EventOdds
 from src.chatbot.handlers import get_best_bets
 from src.analysis.base import AnalysisEngine
 from src.feeds.query import FeedQuery
@@ -291,13 +291,13 @@ class ChatbotCore:
             return self._fallback_query_analysis(question)
         
         try:
-            system_prompt = """You are an expert sports betting query analyzer. Extract ALL relevant information from user queries about sports betting.
+            system_prompt = """You are an expert sports betting query analyzer with comprehensive knowledge of ALL team names, nicknames, abbreviations, and variations across ALL sports.
 
 Return a JSON object with these fields:
 {
   "sports": ["NBA", "NFL", "MLB", "NHL", "NCAAF", "NCAAB", "WNBA", "MMA"],
-  "teams": ["team names mentioned"],
-  "players": ["player names mentioned"], 
+  "teams": ["NORMALIZED full team names"],
+  "players": ["full player names"], 
   "markets": ["H2H", "SPREAD", "TOTAL", "PLAYER_POINTS", "PLAYER_ASSISTS", "PLAYER_REBOUNDS"],
   "timeframe": {
     "type": "tonight|today|tomorrow|weekend|week|specific_date|general",
@@ -308,16 +308,28 @@ Return a JSON object with these fields:
   "confidence": 0.95
 }
 
-Examples:
-- "Lakers odds tonight" -> sports:["NBA"], teams:["Lakers"], timeframe:{type:"tonight",hours:8}
-- "LeBron points props" -> sports:["NBA"], players:["LeBron James"], markets:["PLAYER_POINTS"]
-- "best NFL bets this weekend" -> sports:["NFL"], timeframe:{type:"weekend",hours:72}
-- "Mahomes passing yards tomorrow" -> sports:["NFL"], players:["Patrick Mahomes"], markets:["PLAYER_POINTS"]
-- "Knicks spread" -> sports:["NBA"], teams:["New York Knicks"], markets:["SPREAD"]
+CRITICAL: For teams, ALWAYS return the FULL OFFICIAL NAME that would appear in betting APIs:
+- "Lakers", "LAL", "LA" → "Los Angeles Lakers"
+- "Warriors", "GSW", "Dubs" → "Golden State Warriors"  
+- "Knicks", "NYK" → "New York Knicks"
+- "Sixers", "76ers" → "Philadelphia 76ers"
+- "Cavs" → "Cleveland Cavaliers"
+- "Bucs" → "Tampa Bay Buccaneers"
+- "Chiefs", "KC" → "Kansas City Chiefs"
+- "Pats" → "New England Patriots"
+- "Dodgers", "LAD" → "Los Angeles Dodgers"
+- "Yankees", "NYY" → "New York Yankees"
+- "Sox" (context needed) → "Boston Red Sox" or "Chicago White Sox"
 
-Be intelligent about team name variations (Lakers=Los Angeles Lakers, Knicks=New York Knicks, etc.)
-For player props, infer the sport from the player name.
-Extract timeframe even from implicit references."""
+Handle ALL possible team variations intelligently. You know every team in every major sport.
+
+Examples:
+- "Lakers odds tonight" → teams:["Los Angeles Lakers"], sports:["NBA"]
+- "Dubs spread" → teams:["Golden State Warriors"], sports:["NBA"], markets:["SPREAD"]
+- "KC Chiefs this weekend" → teams:["Kansas City Chiefs"], sports:["NFL"]
+- "Pats vs Bills" → teams:["New England Patriots", "Buffalo Bills"], sports:["NFL"]
+
+ALWAYS normalize team names to their full official names for API compatibility."""
 
             response = self.openai_client.chat.completions.create(
                 model=self.model,
@@ -338,37 +350,15 @@ Extract timeframe even from implicit references."""
             return self._fallback_query_analysis(question)
     
     def _fallback_query_analysis(self, question: str) -> Dict[str, Any]:
-        """Fallback analysis when AI is unavailable."""
-        question_lower = question.lower()
-        
-        # Basic sport detection
-        sports = []
-        if any(word in question_lower for word in ["nba", "basketball", "lakers", "warriors"]):
-            sports.append("NBA")
-        if any(word in question_lower for word in ["nfl", "football", "chiefs", "patriots"]):
-            sports.append("NFL")
-        if any(word in question_lower for word in ["mlb", "baseball", "yankees", "dodgers"]):
-            sports.append("MLB")
-        if any(word in question_lower for word in ["nhl", "hockey", "rangers", "bruins"]):
-            sports.append("NHL")
-        
-        # Basic time detection
-        timeframe = {"type": "general", "hours": 24, "description": "next 24 hours"}
-        if "tonight" in question_lower:
-            timeframe = {"type": "tonight", "hours": 8, "description": "tonight"}
-        elif "tomorrow" in question_lower:
-            timeframe = {"type": "tomorrow", "hours": 24, "description": "tomorrow"}
-        elif "weekend" in question_lower:
-            timeframe = {"type": "weekend", "hours": 72, "description": "this weekend"}
-        
+        """Minimal fallback when AI is completely unavailable - return generic search."""
         return {
-            "sports": sports,
+            "sports": ["NBA", "NFL", "MLB", "NHL"],  # All major sports
             "teams": [],
             "players": [],
             "markets": ["H2H", "SPREAD", "TOTAL"],
-            "timeframe": timeframe,
+            "timeframe": {"type": "general", "hours": 24, "description": "next 24 hours"},
             "intent": "general_picks",
-            "confidence": 0.5
+            "confidence": 0.3  # Very low confidence for generic fallback
         }
     
     def _sports_to_leagues(self, sports: List[SportKey]) -> List[str]:
@@ -415,12 +405,12 @@ Extract timeframe even from implicit references."""
         # Convert sports to leagues for the feed
         leagues = self._sports_to_leagues(detected_sports)
         
-        # Convert market strings to MarketKey enums
+        # Convert market strings to MarketType enums
         detected_markets = []
         market_mapping = {
-            "H2H": MarketKey.H2H, "SPREAD": MarketKey.SPREAD, "TOTAL": MarketKey.TOTAL,
-            "TEAM_TOTAL": MarketKey.TEAM_TOTAL, "PLAYER_POINTS": MarketKey.PLAYER_POINTS,
-            "PLAYER_ASSISTS": MarketKey.PLAYER_ASSISTS, "PLAYER_REBOUNDS": MarketKey.PLAYER_REBOUNDS
+            "H2H": MarketType.H2H, "SPREAD": MarketType.SPREAD, "TOTAL": MarketType.TOTAL,
+            "TEAM_TOTAL": MarketType.TEAM_TOTAL, "PLAYER_POINTS": MarketType.PLAYER_PROPS,
+            "PLAYER_ASSISTS": MarketType.PLAYER_PROPS, "PLAYER_REBOUNDS": MarketType.PLAYER_PROPS
         }
         
         for market_str in analysis.get("markets", []):
@@ -429,7 +419,7 @@ Extract timeframe even from implicit references."""
         
         # If no markets detected, use main game markets
         if not detected_markets:
-            detected_markets = [MarketKey.H2H, MarketKey.SPREAD, MarketKey.TOTAL]
+            detected_markets = [MarketType.H2H, MarketType.SPREAD, MarketType.TOTAL]
         
         # Use AI-detected timeframe or default
         timeframe = analysis.get("timeframe", {})
@@ -516,7 +506,7 @@ Extract timeframe even from implicit references."""
         # Filter by players if specified (for player props)
         players = analysis.get("players", [])
         if players:
-            filtered_odds = self._filter_odds_by_players(filtered_odds, players)
+            filtered_odds = self._filter_odds_by_players_ai(filtered_odds, players)
             logger.info(f"Filtered by players {players}: {len(filtered_odds)} games remaining")
         
         return filtered_odds
@@ -524,7 +514,7 @@ Extract timeframe even from implicit references."""
     def _filter_odds_by_teams_ai(self, event_odds_list: List[EventOdds], team_names: List[str]) -> List[EventOdds]:
         """
         Filter odds using AI-detected team names.
-        Much more flexible than keyword matching.
+        AI handles ALL team variations - no manual mapping needed!
         """
         if not team_names:
             return event_odds_list
@@ -538,44 +528,15 @@ Extract timeframe even from implicit references."""
             for team_name in team_names:
                 team_lower = team_name.lower()
                 
-                # Direct match or partial match
+                # AI should have normalized team names, so just do fuzzy matching
                 if any(team_lower in comp_name or comp_name in team_lower 
-                       for comp_name in competitor_names):
-                    filtered.append(event_odds)
-                    break
-                
-                # Handle common abbreviations and variations
-                # The AI should have already normalized these, but add some safety
-                team_variations = self._get_team_variations(team_name)
-                if any(var in comp_name for var in team_variations 
                        for comp_name in competitor_names):
                     filtered.append(event_odds)
                     break
         
         return filtered
     
-    def _get_team_variations(self, team_name: str) -> List[str]:
-        """Get common variations of a team name for matching."""
-        variations = [team_name.lower()]
-        
-        # Common abbreviations
-        abbrev_map = {
-            "lakers": ["lal", "los angeles"],
-            "warriors": ["gsw", "golden state"],
-            "knicks": ["nyk", "new york"],
-            "nets": ["bkn", "brooklyn"],
-            "celtics": ["bos", "boston"],
-            "heat": ["mia", "miami"],
-            # Add more as needed
-        }
-        
-        for full_name, abbrevs in abbrev_map.items():
-            if full_name in team_name.lower():
-                variations.extend(abbrevs)
-        
-        return variations
-    
-    def _filter_odds_by_players(self, event_odds_list: List[EventOdds], player_names: List[str]) -> List[EventOdds]:
+    def _filter_odds_by_players_ai(self, event_odds_list: List[EventOdds], player_names: List[str]) -> List[EventOdds]:
         """
         Filter for games involving specific players.
         This would need roster data or player-team mapping.
@@ -585,67 +546,6 @@ Extract timeframe even from implicit references."""
         # For now, return all games as player props are market-specific
         logger.info(f"Player filtering not yet implemented for: {player_names}")
         return event_odds_list
-    
-    def _extract_team_names(self, question: str) -> List[str]:
-        """
-        Extract specific team names mentioned in the question.
-        Uses enhanced keyword detection with comprehensive team lists.
-        """
-        return self._extract_team_names_keywords(question)
-    
-    def _extract_team_names_keywords(self, question: str) -> List[str]:
-        """Enhanced keyword-based team extraction with comprehensive team lists."""
-        question_lower = question.lower()
-        
-        # Comprehensive team keywords across all major sports
-        team_keywords = [
-            # NBA teams
-            "lakers", "warriors", "celtics", "nets", "knicks", "76ers", "sixers", "raptors",
-            "bucks", "cavaliers", "cavs", "bulls", "pistons", "pacers", "heat", "hawks", 
-            "hornets", "wizards", "magic", "clippers", "kings", "suns", "nuggets", 
-            "timberwolves", "thunder", "blazers", "jazz", "mavericks", "mavs", "rockets", 
-            "grizzlies", "pelicans", "spurs",
-            
-            # NFL teams
-            "patriots", "bills", "dolphins", "jets", "steelers", "ravens", "browns", "bengals",
-            "titans", "colts", "texans", "jaguars", "chiefs", "chargers", "broncos", "raiders",
-            "cowboys", "giants", "eagles", "commanders", "packers", "bears", "lions", "vikings",
-            "falcons", "panthers", "saints", "buccaneers", "bucs", "49ers", "seahawks", "rams", "cardinals",
-            
-            # MLB teams  
-            "yankees", "red sox", "orioles", "rays", "blue jays", "guardians", "twins", "white sox",
-            "tigers", "royals", "astros", "angels", "mariners", "rangers", "athletics", "braves",
-            "mets", "phillies", "nationals", "marlins", "brewers", "cardinals", "reds", "cubs",
-            "pirates", "dodgers", "padres", "giants", "rockies", "diamondbacks",
-            
-            # NHL teams
-            "bruins", "sabres", "red wings", "panthers", "canadiens", "senators", "lightning",
-            "maple leafs", "hurricanes", "blue jackets", "devils", "islanders", "rangers",
-            "flyers", "penguins", "capitals", "blackhawks", "avalanche", "stars", "wild",
-            "predators", "blues", "jets", "coyotes", "ducks", "flames", "oilers", "kings",
-            "sharks", "kraken", "canucks", "golden knights"
-        ]
-        
-        found_teams = []
-        for team in team_keywords:
-            if team in question_lower:
-                found_teams.append(team)
-        
-        return found_teams
-    
-    def _filter_odds_by_teams(self, event_odds_list: List[EventOdds], team_names: List[str]) -> List[EventOdds]:
-        """Filter odds to only include games involving the specified teams."""
-        filtered = []
-        
-        for event_odds in event_odds_list:
-            competitor_names = [comp.name.lower() for comp in event_odds.event.competitors]
-            
-            for team_name in team_names:
-                if any(team_name in comp_name for comp_name in competitor_names):
-                    filtered.append(event_odds)
-                    break
-        
-        return filtered
     
     def _format_odds_response(self, event_odds_list: List[EventOdds], original_question: str, analysis: Dict[str, Any], limit: int = 5) -> str:
         """Format the odds response for display to the user with AI context."""

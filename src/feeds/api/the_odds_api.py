@@ -7,7 +7,7 @@ from config.config import Config
 from src.feeds.base import OddsFeed
 from src.feeds.models import (
     SportKey,
-    MarketKey,
+    MarketType,
     Event,
     EventOdds,
     Bookmaker,
@@ -41,9 +41,9 @@ class TheOddsApiAdapter(OddsFeed):
     }
 
     MARKET_MAP = {
-        "h2h": MarketKey.H2H,
-        "spreads": MarketKey.SPREAD,
-        "totals": MarketKey.TOTAL,
+        "h2h": MarketType.H2H,
+        "spreads": MarketType.SPREAD,
+        "totals": MarketType.TOTAL,
     }
 
     def __init__(self, api_key: str | None = None):
@@ -76,9 +76,9 @@ class TheOddsApiAdapter(OddsFeed):
             Bookmaker(key="betmgm", title="BetMGM"),
         ]
 
-    def list_markets(self, sport: SportKey | None = None) -> List[MarketKey]:
+    def list_markets(self, sport: SportKey | None = None) -> List[MarketType]:
         # Returns the featured markets that are most common.
-        return [MarketKey.H2H, MarketKey.SPREAD, MarketKey.TOTAL]
+        return [MarketType.H2H, MarketType.SPREAD, MarketType.TOTAL]
 
     def get_events(self, q: FeedQuery) -> List[Event]:
         if not q.sport:

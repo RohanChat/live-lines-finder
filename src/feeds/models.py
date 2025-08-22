@@ -14,6 +14,9 @@ class SportKey(str, Enum):
     NHL = "icehockey_nhl"
     MMA = "mma"
     FOOTBALL = "football"
+    UFC = "ufc"
+    BOXING = "boxing"
+    TENNIS = "tennis"
 
 class Period(str, Enum):
     FULL_GAME = "full_game"
@@ -25,14 +28,13 @@ class Period(str, Enum):
     Q4 = "q4"
     OT = "ot"
 
-class MarketKey(str, Enum):
+class MarketType(str, Enum):
     H2H = "h2h"
     SPREAD = "spread"
     TOTAL = "total"
     TEAM_TOTAL = "team_total"
-    PLAYER_POINTS = "player_points"
-    PLAYER_ASSISTS = "player_assists"
-    PLAYER_REBOUNDS = "player_rebounds"
+    
+    PLAYER_PROPS = "player_props"
 
 @dataclass
 class Bookmaker:
@@ -59,12 +61,17 @@ class OutcomePrice:
 
 @dataclass
 class Market:
-    market_key: MarketKey
+    market_type: MarketType
     period: Period = Period.FULL_GAME
     scope: Optional[str] = None       # "game" | "team" | "player"
     subject_id: Optional[str] = None  # team_id or player_id
     outcomes: List[OutcomePrice] = field(default_factory=list)
     meta: Dict = field(default_factory=dict)
+    
+    # Backward compatibility property
+    @property
+    def market_key(self) -> str:
+        return self.market_type.value
 
 @dataclass
 class Event:
@@ -103,7 +110,7 @@ class FeedDelta:
 @dataclass
 class SgpLeg:
     event_id: str
-    market_key: MarketKey
+    market_type: MarketType
     outcome_key: str
     line: Optional[float] = None
     period: Period = Period.FULL_GAME

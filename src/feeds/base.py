@@ -1,7 +1,7 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import List, Optional
-from .models import SportKey, MarketKey, Event, EventOdds, Bookmaker
+from .models import SportKey, MarketType, Event, EventOdds, Bookmaker
 from .query import FeedQuery
 
 class OddsFeed(ABC):
@@ -13,7 +13,7 @@ class OddsFeed(ABC):
     @abstractmethod
     def list_bookmakers(self) -> List[Bookmaker]: ...
     @abstractmethod
-    def list_markets(self, sport: Optional[SportKey] = None) -> List[MarketKey]: ...
+    def list_markets(self, sport: Optional[SportKey] = None) -> List[MarketType]: ...
 
     # queries
     @abstractmethod

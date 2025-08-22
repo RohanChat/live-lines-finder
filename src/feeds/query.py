@@ -2,7 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional, List, Dict
 from datetime import datetime
-from .models import SportKey, MarketKey, Period
+from .models import SportKey, MarketType, Period
 
 @dataclass
 class FeedQuery:
@@ -11,7 +11,7 @@ class FeedQuery:
     event_ids: Optional[List[str]] = None
     start_time_from: Optional[datetime] = None
     start_time_to: Optional[datetime] = None
-    markets: Optional[List[MarketKey]] = None
+    markets: Optional[List[MarketType]] = None
     periods: Optional[List[Period]] = None
     bookmakers: Optional[List[str]] = None
     players: Optional[List[str]] = None
