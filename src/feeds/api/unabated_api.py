@@ -64,6 +64,7 @@ class UnabatedApiAdapter(OddsFeed):
             
         except FileNotFoundError:
             # Fallback to basic mappings if file not found
+            print("⚠️  Unabated clean mappings not found, using basic mappings")
             self.league_map = {"nfl": "nfl", "nba": "nba", "mlb": "mlb", "nhl": "nhl", "wnba": "wnba"}
             self.sport_key_map = {"nfl": "americanfootball_nfl", "nba": "basketball_nba"}
             self.sportsbooks_data = {}
@@ -73,7 +74,7 @@ class UnabatedApiAdapter(OddsFeed):
     def _load_player_mappings(self):
         """Load comprehensive player mappings for name resolution"""
         try:
-            with open('config/comprehensive_mappings.json', 'r') as f:
+            with open('config/unabated_player_mappings.json', 'r') as f:
                 comprehensive_data = json.load(f)
                 
             self.player_mappings = comprehensive_data.get('players', {})

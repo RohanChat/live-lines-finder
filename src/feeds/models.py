@@ -14,7 +14,6 @@ class SportKey(str, Enum):
     NHL = "icehockey_nhl"
     MMA = "mma"
     FOOTBALL = "football"
-    UFC = "ufc"
     BOXING = "boxing"
     TENNIS = "tennis"
 
@@ -27,13 +26,20 @@ class Period(str, Enum):
     Q3 = "q3"
     Q4 = "q4"
     OT = "ot"
+    P1 = "p1"
+    P2 = "p2"
+    P3 = "p3"
+    INN1 = "inn1"
+    INN3 = "inn3"
+    INN5 = "inn5"
+    INN7 = "inn7"
 
 class MarketType(str, Enum):
     H2H = "h2h"
     SPREAD = "spread"
     TOTAL = "total"
+    FUTURES = "futures"
     TEAM_TOTAL = "team_total"
-    
     PLAYER_PROPS = "player_props"
 
 @dataclass
@@ -62,7 +68,9 @@ class OutcomePrice:
 @dataclass
 class Market:
     market_type: MarketType
+    sport: SportKey
     period: Period = Period.FULL_GAME
+    alternate: Optional[bool] = None
     scope: Optional[str] = None       # "game" | "team" | "player"
     subject_id: Optional[str] = None  # team_id or player_id
     outcomes: List[OutcomePrice] = field(default_factory=list)
@@ -132,3 +140,10 @@ class SgpQuoteResponse:
     valid: bool
     deeplink_url: Optional[str] = None
     raw: Optional[Dict] = None
+
+class Region(str, Enum):
+    US: "us"
+    UK: "uk"
+    EU: "eu"
+    AU: "au"
+    OTHER: "other"

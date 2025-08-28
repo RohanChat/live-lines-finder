@@ -73,15 +73,16 @@ class ChatbotCore:
     def __init__(
         self,
         platform: BaseMessagingClient,
-        provider_name: str = Config.ODDS_PROVIDER,
+        provider_names: Optional[str] = Config.ACTIVE_ODDS_PROVIDERS,
         analysis_engines: Optional[Sequence[AnalysisEngine]] = None,
         openai_api_key: Optional[str] = None,
         model: str = Config.OPENAI_MODEL,
         product_id: Optional[str] = None
     ) -> None:
         self.platform = platform
-        self.provider_name = provider_name
-        self.feed = self.create_feed_adapter(provider_name)
+        self.provider_names = provider_names
+        self.feeds = [self.create_feed_adapter(name) for name in (provider_names if isinstance(provider_names, list) else [provider_names])]
+        self.main_feed = self.feeds[0] if self.feeds else self.create_feed_adapter("unabated")
         self.engines: list[AnalysisEngine] = list(analysis_engines or [])
         self.model = model
         self.product_id = product_id or Config.PRODUCT_IDS.get('betting_assistant', {}).get('test', 'default')
@@ -115,7 +116,7 @@ class ChatbotCore:
                 "type": "function",
                 "function": {
                     "name": "best_picks",
-                    "description": "Return top arbitrage opportunities in the next X hours",
+                    "description": "Return top picks in the next X hours",
                     "parameters": {
                         "type": "object",
                         "properties": {
@@ -295,7 +296,7 @@ Return a JSON object with these fields:
   "sports": ["NBA", "NFL", "MLB", "NHL", "NCAAF", "NCAAB", "WNBA", "MMA"],
   "teams": ["NORMALIZED full team names"],
   "players": ["full player names"], 
-  "markets": ["H2H", "SPREAD", "TOTAL", "PLAYER_POINTS", "PLAYER_ASSISTS", "PLAYER_REBOUNDS"],
+  "markets": ["H2H", "SPREAD", "TOTAL", "PLAYER_PROPS"],
   "timeframe": {
     "type": "tonight|today|tomorrow|weekend|week|specific_date|general",
     "hours": 24,
@@ -358,24 +359,6 @@ ALWAYS normalize team names to their full official names for API compatibility."
             "confidence": 0.3  # Very low confidence for generic fallback
         }
     
-    def _sports_to_leagues(self, sports: List[SportKey]) -> List[str]:
-        """
-        Convert SportKey enums to league strings that Unabated expects.
-        Uses the mapping from unabated_maps.json.
-        """
-        if isinstance(self.feed, UnabatedApiAdapter):
-            leagues = []
-            for sport in sports:
-                # Map SportKey to league string using reverse lookup
-                for league, sport_key in self.feed.SPORT_MAP.items():
-                    if sport_key == sport.value:
-                        leagues.append(league)
-                        break
-            return leagues
-        else:
-            # For other feeds, the sport enum values might work directly
-            return [sport.value for sport in sports]
-    
     def build_smart_query(self, question: str, hours: int = 24) -> FeedQuery:
         """
         Parse a user question using AI and build an appropriate FeedQuery.
@@ -388,7 +371,8 @@ ALWAYS normalize team names to their full official names for API compatibility."
         detected_sports = []
         sport_mapping = {
             "NFL": SportKey.NFL, "NBA": SportKey.NBA, "MLB": SportKey.MLB, "NHL": SportKey.NHL,
-            "NCAAF": SportKey.NCAAF, "NCAAB": SportKey.NCAAB, "WNBA": SportKey.WNBA, "MMA": SportKey.MMA
+            "NCAAF": SportKey.NCAAF, "NCAAB": SportKey.NCAAB, "WNBA": SportKey.WNBA, "MMA": SportKey.MMA,
+            "football": SportKey.FOOTBALL, "boxing": SportKey.BOXING, "tennis": SportKey.TENNIS
         }
         
         for sport_str in analysis.get("sports", []):
@@ -397,22 +381,21 @@ ALWAYS normalize team names to their full official names for API compatibility."
         
         # If no sports detected, use all available sports
         if not detected_sports:
-            detected_sports = self.feed.list_sports()
-        
-        # Convert sports to leagues for the feed
-        leagues = self._sports_to_leagues(detected_sports)
+            detected_sports = self.main_feed.list_sports()
         
         # Convert market strings to MarketType enums
         detected_markets = []
         market_mapping = {
             "H2H": MarketType.H2H, "SPREAD": MarketType.SPREAD, "TOTAL": MarketType.TOTAL,
-            "TEAM_TOTAL": MarketType.TEAM_TOTAL, "PLAYER_POINTS": MarketType.PLAYER_PROPS,
-            "PLAYER_ASSISTS": MarketType.PLAYER_PROPS, "PLAYER_REBOUNDS": MarketType.PLAYER_PROPS
+            "TEAM_TOTAL": MarketType.TEAM_TOTAL, "PLAYER_PROPS": MarketType.PLAYER_PROPS
         }
         
         for market_str in analysis.get("markets", []):
             if market_str in market_mapping:
                 detected_markets.append(market_mapping[market_str])
+
+            elif "PLAYER" in market_str:
+                detected_markets.append(MarketType.PLAYER_PROPS)
         
         # If no markets detected, use main game markets
         if not detected_markets:
@@ -427,7 +410,7 @@ ALWAYS normalize team names to their full official names for API compatibility."
         
         # Store analysis for later use in filtering
         query = FeedQuery(
-            leagues=leagues,
+            sports=detected_sports,
             markets=detected_markets,
             start_time_to=end_time
         )
@@ -460,10 +443,46 @@ ALWAYS normalize team names to their full official names for API compatibility."
             # Build the query from the question (now fully AI-powered)
             query = self.build_smart_query(question, hours)
             analysis = getattr(query, '_ai_analysis', {})
-            
-            # Fetch odds using the query
-            logger.info(f"Fetching odds with AI-powered query: leagues={query.leagues}, markets={[m.value for m in query.markets]}")
-            event_odds_list = self.feed.get_odds(query)
+
+            sports = query.sports
+            event_odds_list: List[EventOdds] = []
+
+            if not sports:
+                logger.info("No sports detected by AI, using all available sports")
+                event_odds_list = self.main_feed.get_odds(query) or []
+            else:
+                # Main feed first, then others
+                feeds_order = [self.main_feed] + [f for f in self.feeds if f is not self.main_feed]
+                feed_support = {feed: set(feed.list_sports() or []) for feed in feeds_order}
+
+                # Assign each requested sport to the first feed that supports it
+                per_feed_sports: Dict[OddsFeed, set] = {}
+                unsupported: set = set()
+
+                for sport in sports:
+                    for feed in feeds_order:
+                        if sport in feed_support[feed]:
+                            per_feed_sports.setdefault(feed, set()).add(sport)
+                            break
+                    else:
+                        unsupported.add(sport)
+
+                # Query each feed once with only the sports it supports
+                for feed, sports_bucket in per_feed_sports.items():
+                    sub_query = FeedQuery(
+                        sports=list(sports_bucket),
+                        markets=query.markets,
+                        start_time_from=getattr(query, "start_time_from", None),
+                        start_time_to=getattr(query, "start_time_to", None),
+                    )
+                    results = feed.get_odds(sub_query) or []
+                    event_odds_list.extend(results)
+
+                # Graceful message if nothing supported
+                if unsupported and not event_odds_list:
+                    timeframe_desc = analysis.get("timeframe", {}).get("description", f"next {hours} hours")
+                    missing = ", ".join(getattr(s, "value", str(s)) for s in unsupported)
+                    return f"Sorry, no provider supports the requested sports: {missing}. Try a different sport or timeframe ({timeframe_desc})."
             
             if not event_odds_list:
                 timeframe_desc = analysis.get("timeframe", {}).get("description", f"next {hours} hours")

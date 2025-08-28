@@ -1,7 +1,7 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
-from typing import List, Optional
-from .models import SportKey, MarketType, Event, EventOdds, Bookmaker
+from typing import List, Optional, Union
+from .models import Period, Region, SportKey, MarketType, Event, EventOdds, Bookmaker, Competitor, Market
 from .query import FeedQuery
 
 class OddsFeed(ABC):
@@ -14,20 +14,21 @@ class OddsFeed(ABC):
     def list_bookmakers(self) -> List[Bookmaker]: ...
     @abstractmethod
     def list_markets(self, sport: Optional[SportKey] = None) -> List[MarketType]: ...
-
-    # queries
     @abstractmethod
     def get_events(self, q: FeedQuery) -> List[Event]: ...
+
     @abstractmethod
-    def get_event_odds(self, event_id: str, q: FeedQuery) -> EventOdds: ...
+    def get_event_odds(self, event: Event, q: FeedQuery) -> EventOdds: ...
     @abstractmethod
     def get_odds(self, q: FeedQuery) -> List[EventOdds]: ...
 
-    # mapping hooks
     @abstractmethod
     def _normalize_event(self, raw) -> Event: ...
     @abstractmethod
     def _normalize_event_odds(self, raw_event, raw_odds, q: FeedQuery) -> EventOdds: ...
+
+    @abstractmethod
+    def provider_key(self, key: Union[SportKey, Period, MarketType, Market, Region]) -> str: ...
 
 class SgpSupport:
     def supports_sgp(self) -> bool: return False

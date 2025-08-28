@@ -20,4 +20,5 @@ websockets
 openai
 supabase
 graphql-ws
+requests
 python-dotenv

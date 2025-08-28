@@ -10,7 +10,7 @@ class UnabatedSgpAdapter(SgpSupport):
     """
     Adapter for Unabated's SGP pricing and deeplink functionality.
     """
-    BASE_URL = "https://api.unabated.com/deeplink/sgp" # This is a guess based on docs, might need adjustment
+    BASE_URL = Config.UNABATED_DATA_API_URL
 
     def __init__(self, api_key: str | None = None):
         self.api_key = api_key or Config.UNABATED_API_KEY

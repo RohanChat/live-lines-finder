@@ -71,7 +71,7 @@ def main():
 
     core = ChatbotCore(
       platform=platform,
-      provider_name="unabated",
+      provider_name=Config.ACTIVE_ODDS_PROVIDERS,
       openai_api_key=Config.OPENAI_API_KEY,
       model=Config.OPENAI_MODEL,
       product_id=product_id

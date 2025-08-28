@@ -5,7 +5,7 @@ import time
 
 from src.feeds.base import OddsFeed
 from src.feeds.query import FeedQuery
-from src.feeds.models import SportKey, MarketKey
+from src.feeds.models import SportKey, MarketType
 
 # Simple in-memory cache with a TTL
 _cache = {}
@@ -15,7 +15,7 @@ def get_best_bets(
     feed: OddsFeed,
     sport: SportKey,
     hours: int = 24,
-    markets: List[MarketKey] | None = None,
+    markets: List[MarketType] | None = None,
     books: List[str] | None = None,
     top_k: int = 3
 ) -> str:
@@ -24,7 +24,7 @@ def get_best_bets(
     For this example, it will just format the first few available odds.
     """
     if markets is None:
-        markets = [MarketKey.H2H, MarketKey.SPREAD, MarketKey.TOTAL]
+        markets = [MarketType.H2H, MarketType.SPREAD, MarketType.TOTAL]
 
     query = FeedQuery(
         sport=sport,
