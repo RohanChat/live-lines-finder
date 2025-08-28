@@ -14,3 +14,4 @@ mappings/
 .vscode/
 tests/
 old/
+config/*.json
