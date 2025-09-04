@@ -15,3 +15,5 @@ mappings/
 tests/
 old/
 config/*.json
+*.log
+logs/

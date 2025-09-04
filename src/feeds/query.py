@@ -10,7 +10,7 @@ class FeedQuery:
     event_ids: Optional[List[str]] = None
     start_time_from: Optional[datetime] = None
     start_time_to: Optional[datetime] = None
-    markets: Optional[List[Market]] = None
+    markets: Optional[List[MarketType]] = None
     periods: Optional[List[Period]] = None
     bookmakers: Optional[List[str]] = None
     players: Optional[List[str]] = None

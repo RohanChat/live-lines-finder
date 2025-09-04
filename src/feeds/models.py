@@ -69,7 +69,7 @@ class OutcomePrice:
 class Market:
     market_type: MarketType
     sport: SportKey
-    period: Period = Period.FULL_GAME
+    period: Period
     alternate: Optional[bool] = None
     scope: Optional[str] = None       # "game" | "team" | "player"
     subject_id: Optional[str] = None  # team_id or player_id
@@ -142,8 +142,8 @@ class SgpQuoteResponse:
     raw: Optional[Dict] = None
 
 class Region(str, Enum):
-    US: "us"
-    UK: "uk"
-    EU: "eu"
-    AU: "au"
-    OTHER: "other"
+    US = "us"
+    UK = "uk"
+    EU = "eu"
+    AU = "au"
+    OTHER = "other"

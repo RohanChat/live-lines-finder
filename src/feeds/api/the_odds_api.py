@@ -22,19 +22,7 @@ from src.feeds.models import (
     Region
 )
 from src.feeds.query import FeedQuery
-
-
-def american_to_decimal(american_odds: int) -> float:
-    if american_odds is None:
-        return None
-    try:
-        american_odds = int(american_odds)
-    except Exception:
-        return None
-    if american_odds > 0:
-        return round(1 + (american_odds / 100.0), 4)
-    else:
-        return round(1 - (100.0 / american_odds), 4)
+from src.utils.odds_utils import american_to_decimal
 
 
 class TheOddsApiAdapter(OddsFeed):
@@ -61,7 +49,7 @@ class TheOddsApiAdapter(OddsFeed):
         self._internal_to_provider_region: Dict[Region, str] = {}
         for internal_region_str, provider_val in self.mapping.get("regions", {}).items():
             try:
-                region_enum = Region(internal_region_str.upper())  # match Enum name
+                region_enum = Region(internal_region_str)  # match Enum name
             except Exception:
                 continue
             # keep as raw string (comma-separated)
@@ -147,16 +135,26 @@ class TheOddsApiAdapter(OddsFeed):
             return provider_val
 
         raise TypeError(f"Unsupported type for provider_key: {type(key).__name__}")
+    
+    def internal_key(self, provider_key: str) -> Union[SportKey, Period, MarketType, Market, Region]:
+        if provider_key in self._provider_to_internal_sport:
+            return self._provider_to_internal_sport[provider_key]
+        else: 
+            raise NotImplementedError(f"internal_key not implemented for provider_key: {provider_key}")
 
     # ------------------------ HTTP ------------------------
 
     def _get(self, endpoint: str, params: Optional[Dict[str, Any]] = None) -> Any:
         url = f"{self.base_url}/{endpoint.lstrip('/')}"
-        q = {"apiKey": self.api_key, "dateFormat": "iso", "oddsFormat": "american"}
+        q = {"apiKey": self.api_key, "dateFormat": "iso", "oddsFormat": "american", "includeLinks": "true", "includeBetLimits": "true"}
         if params:
             q.update({k: v for k, v in params.items() if v not in (None, "", [])})
+        if "regions" not in q or not q.get("regions"):
+            q["regions"] = self.provider_key(Region.US)  # default to US
         resp = requests.get(url, params=q, timeout=30)
         resp.raise_for_status()
+        print("making api call \n")
+        print(resp.url + "\n\n")
         return resp.json()
 
     # ------------------------ Public API ------------------------
@@ -223,52 +221,243 @@ class TheOddsApiAdapter(OddsFeed):
         sports = self._resolve_query_sports(q)
         if not sports:
             raise ValueError("At least one sport must be provided in FeedQuery.sports")
+        
+        print("Feedquery: \n")
+        print(str(q) + "\n\n")
 
         events: List[Event] = []
-        for internal in sports:
-            for provider_key in self._internal_to_provider_sport_keys(internal):
-                params = {}
-                if q.start_time_from:
-                    params["commenceTimeFrom"] = q.start_time_from.isoformat()
-                if q.start_time_to:
-                    params["commenceTimeTo"] = q.start_time_to.isoformat()
-                raw = self._get(f"sports/{provider_key}/events", params=params)
-                for e in raw or []:
-                    ev = self._normalize_event(e)
-                    # optional team filter
-                    if q.teams:
-                        teams_lower = {t.lower() for t in q.teams}
-                        names = {c.name.lower() for c in ev.competitors}
-                        if not teams_lower & names:
-                            continue
-                    events.append(ev)
+        for sport in sports:
+            params = {}
+            if q.start_time_from:
+                params["commenceTimeFrom"] = q.start_time_from.isoformat()
+            if q.start_time_to:
+                params["commenceTimeTo"] = q.start_time_to.isoformat()
+            provider_key = self.provider_key(sport)
+            raw = self._get(f"sports/{provider_key}/events", params=params)
+            for e in raw or []:
+                ev = self._normalize_event(e)
+                # optional team filter
+                if q.teams:
+                    teams_lower = {t.lower() for t in q.teams}
+                    names = {c.name.lower() for c in ev.competitors}
+                    if not teams_lower & names:
+                        continue
+                events.append(ev)
 
-        # limit
         if q.limit:
+            print("Limiting events to: ", q.limit)
             events = events[: q.limit]
+
+        print("Total events fetched: ", len(events), "\n\n")
+        print(str(events) + "\n\n")
         return events
 
-    def get_event_odds(self, event_id: str, q: FeedQuery) -> EventOdds:
-        return NotImplementedError("not implemented yet")
+    def get_event_odds(self, event: Event, q: FeedQuery) -> EventOdds:
+        
+        if not event or not event.event_id:
+            raise ValueError("Event with valid event_id must be provided.")
+
+        print("Fetching odds for \n" + str(event) + "\n\n" "with feedquery:\n" + str(q) + "\n\n")
+        sport_provider_key = self.provider_key(event.sport_key)
+        markets_str = ""
+        markets_strings = self.get_available_markets(event.sport_key, q.markets)
+        for market in markets_strings:
+            mkt_str = market
+            markets_str += f"{mkt_str},"
+        markets_str = markets_str.rstrip(",")  # Remove trailing comma
+        if markets_str != "":
+            raw = self._get(f"sports/{sport_provider_key}/events/{event.event_id}/odds", params={"markets": markets_str})
+        else:
+            raw = self._get(f"sports/{sport_provider_key}/events/{event.event_id}/odds")
+        print("Raw odds data: \n"
+              + str(raw) + "\n\n")
+        normalised = self._normalize_event_odds(event=event, raw_odds=raw)
+        print("Normalized odds data: \n"
+              + str(normalised) + "\n\n")
+        return normalised
 
     def get_odds(self, q: FeedQuery) -> List[EventOdds]:
-        
-        output_odds = []
 
-        requested_markets = q.markets or []
-        for market in requested_markets:
-            market_type = market.market_type
-            if not (market_type == MarketType.ALTERNATE 
-            or market_type == MarketType.PLAYER_PROPS):
-                output_odds = output_odds + self.get_main_odds(market)
-            else:
-                return
+        output_odds: List[EventOdds] = []
+
+        ## get general odds for a given sport and/or market type. will not work for alternate or player props
+        if q.event_ids:
+            for i in range(len(q.event_ids)):
+                event_id = q.event_ids[i]
+                sport = q.sports[i] if q.sports and i < len(q.sports) else None
+                if not sport:
+                    raise ValueError("Sport must be provided in FeedQuery.sports when using event_ids.")
+                event = Event(event_id=event_id, sport_key=sport)
+                odds_for_event = self.get_event_odds(event, q)
+                output_odds.append(odds_for_event)
+        
+        else:
+            markets_str = ""
+            if q.markets:
+                for market in q.markets:
+                    mkt_str = self.provider_key(market)
+                    markets_str += f"{mkt_str},"
+                markets_str = markets_str.rstrip(",")
+            if q.sports:
+                for sport in q.sports:
+                    sport_key = self.provider_key(sport)
+                    raw = self._get(f"sports/{sport_key}/odds", params={"markets": markets_str})
+
+        print("RAW ODDS FETCHED FROM API")
+
+        for event_data in raw:
+                    # First normalize the event info
+                    event = self._normalize_event(event_data)
+                    
+                    # Then normalize the odds for this event
+                    event_odds = self._normalize_event_odds(event=event, raw_odds=event_data)
+                    output_odds.append(event_odds)
+        
+        print("NORMALIZED ODDS: \n" + str(output_odds) + "\n\n")
+
+        return output_odds
+
+    def get_available_markets(self, sport_key: SportKey, market_types: Optional[List[MarketType]]) -> List[str]:
+        """
+        Get all available market keys for a sport, including period variants and player props.
+        Returns provider market keys that can be used in API requests.
+        """
+        market_keys = []
+        if not market_types or (MarketType.H2H in market_types or MarketType.SPREAD in market_types or MarketType.TOTAL in market_types or MarketType.TEAM_TOTAL in market_types):
+            # Base markets with period variants
+            market_keys.extend(self._get_base_markets_with_periods(sport_key))
+
+        # additional_markets = self.mapping.get("additional_markets", {})
+        # if sport_key == SportKey.FOOTBALL:
+        #     market_keys.extend(additional_markets.get("global", []))
+
+        # Sport-specific additional markets
+        market_keys.extend(self._get_sport_specific_markets(sport_key))
+        if not market_types or (MarketType.PLAYER_PROPS in market_types):
+            # Player props
+            market_keys.extend(self._get_player_props_markets(sport_key))
+
+        return self._deduplicate_markets(market_keys)
+
+    def _get_base_markets_with_periods(self, sport_key: SportKey) -> List[str]:
+        """Get base markets (h2h, spreads, totals, team_totals) with sport-appropriate periods."""
+        market_keys = []
+        if sport_key == SportKey.MLB:
+            base_markets = [MarketType.H2H, MarketType.SPREAD, MarketType.TOTAL]
+        else:
+            base_markets = [MarketType.H2H, MarketType.SPREAD, MarketType.TOTAL, MarketType.TEAM_TOTAL]
+        valid_periods = self._get_valid_periods_for_sport(sport_key)
+        
+        for market_type in base_markets:
+            try:
+                base_key = self.provider_key(market_type)
+                
+                # Full game market
+                market_keys.append(base_key)
+                
+                # Period variants
+                for period in valid_periods:
+                    try:
+                        period_suffix = self.provider_key(period)
+                        market_keys.append(f"{base_key}{period_suffix}")
+                    except KeyError:
+                        continue
+                        
+                # Alternate variants
+                if market_type in [MarketType.SPREAD, MarketType.TOTAL, MarketType.TEAM_TOTAL]:
+                    alt_base = f"alternate_{base_key}"
+                    market_keys.append(alt_base)
+                    
+                    # Alternate period variants
+                    for period in valid_periods:
+                        try:
+                            period_suffix = self.provider_key(period)
+                            market_keys.append(f"{alt_base}{period_suffix}")
+                        except KeyError:
+                            continue
+                            
+            except KeyError:
+                continue
+                
+        return market_keys
+
+    def _get_valid_periods_for_sport(self, sport_key: SportKey) -> List[Period]:
+        """Return periods that are valid for the given sport."""
+        if sport_key in [SportKey.NFL, SportKey.NCAAF]:
+            return [Period.H1, Period.H2, Period.Q1, Period.Q2, Period.Q3, Period.Q4]
+        elif sport_key in [SportKey.NBA, SportKey.NCAAB, SportKey.WNBA]:
+            return [Period.H1, Period.H2, Period.Q1, Period.Q2, Period.Q3, Period.Q4]
+        elif sport_key == SportKey.NHL:
+            return [Period.P1, Period.P2, Period.P3]
+        elif sport_key == SportKey.MLB:
+            return [Period.INN1, Period.INN3, Period.INN5, Period.INN7]
+        elif sport_key == SportKey.FOOTBALL:  # Soccer
+            return [Period.H1, Period.H2]
+        else:
+            # Default for other sports
+            return [Period.H1, Period.H2]
+
+    def _get_sport_specific_markets(self, sport_key: SportKey) -> List[str]:
+        """Get markets that are specific to certain sports."""
+        additional_markets = self.mapping.get("additional_markets", {})
+        market_keys = []
+        
+        if sport_key == SportKey.FOOTBALL:  # Soccer
+            # Soccer gets 3-way markets with periods
+            valid_periods = self._get_valid_periods_for_sport(sport_key)
+            market_keys.append("h2h_3_way")
+            for period in valid_periods:
+                try:
+                    period_suffix = self.provider_key(period)
+                    market_keys.append(f"h2h_3_way{period_suffix}")
+                except KeyError:
+                    continue
+                    
+        elif sport_key == SportKey.MLB:
+            market_keys.extend(additional_markets.get("baseball_specific", []))
+            
+        elif sport_key == SportKey.NHL:
+            market_keys.extend(additional_markets.get("hockey_specific", []))
+
+        elif sport_key == SportKey.FOOTBALL:
+            market_keys.extend(additional_markets.get("football_specific", []))
+        
+        return market_keys
+
+    def _get_player_props_markets(self, sport_key: SportKey) -> List[str]:
+        """Get all player props markets for the sport."""
+        player_props = self.mapping.get("player_props", {}).get(sport_key.value, {})
+        market_keys = []
+        
+        # Standard player props
+        market_keys.extend(player_props.get("standard", []))
+        
+        # Alternate player props
+        market_keys.extend(player_props.get("alternate", []))
+        
+        return market_keys
+
+    def _deduplicate_markets(self, market_keys: List[str]) -> List[str]:
+        """Remove duplicates while preserving order."""
+        seen = set()
+        deduplicated = []
+        
+        for key in market_keys:
+            if key and key not in seen:
+                seen.add(key)
+                deduplicated.append(key)
+                
+        return deduplicated
 
                 
     # ------------------------ Normalization ------------------------
 
     def _normalize_event(self, raw: Dict[str, Any]) -> Event:
         # Some endpoints return 'sport_key' as the provider key; map to internal enum if possible.
+
+        print("receiving input: \n")
+        print(str(raw) + "\n\n")
+
         raw_sport_key = raw.get("sport_key")
         internal_sport = None
         if raw_sport_key and raw_sport_key in self._provider_to_internal_sport:
@@ -294,7 +483,7 @@ class TheOddsApiAdapter(OddsFeed):
         if start_iso:
             start_dt = datetime.fromisoformat(start_iso.replace("Z", "+00:00"))
 
-        return Event(
+        output_event = Event(
             event_id=raw.get("id"),
             sport_key=internal_sport,
             league=None,  # provider encodes competition in sport_key
@@ -304,55 +493,28 @@ class TheOddsApiAdapter(OddsFeed):
             venue=None,
             meta={"provider_sport_key": raw_sport_key},
         )
+        print("Constructed event output:\n")
+        print(str(output_event) + "\n\n")
+        return output_event
 
-    def _normalize_event_odds(self, raw_event: Dict[str, Any], raw_odds: Dict[str, Any], q: FeedQuery) -> EventOdds:
-        event = self._normalize_event(raw_event if raw_event else raw_odds)
+
+    def _normalize_event_odds(self, event: Event, raw_odds: Dict[str, Any]) -> EventOdds:
+
+        print("Raw odds data: \n")
+        print(str(raw_odds) + "\n")
+
         bookmakers = raw_odds.get("bookmakers", []) if raw_odds else []
 
         # Market bucket keyed by (market_type, period, scope, subject_id, provider_key)
         market_buckets: Dict[Tuple[MarketType, Period, str, Optional[str], str], Market] = {}
 
-        home = raw_event.get("home_team")
-        away = raw_event.get("away_team")
-
-        def detect_period(provider_market_key: str) -> Period:
-            # Only map the ones present in your enum; put others in meta.
-            if provider_market_key.endswith("_q1"):
-                return Period.Q1
-            if provider_market_key.endswith("_q2"):
-                return Period.Q2
-            if provider_market_key.endswith("_q3"):
-                return Period.Q3
-            if provider_market_key.endswith("_q4"):
-                return Period.Q4
-            if provider_market_key.endswith("_h1"):
-                return Period.H1
-            if provider_market_key.endswith("_h2"):
-                return Period.H2
-            if provider_market_key.endswith("_ot"):
-                return Period.OT
-            return Period.FULL_GAME
-
-        def classify_market(provider_market_key: str) -> Tuple[MarketType, str]:
-            k = provider_market_key
-            if k.startswith("h2h"):
-                return (MarketType.H2H, "game")
-            if k.startswith("spreads") or k.startswith("alternate_spreads"):
-                return (MarketType.SPREAD, "game")
-            if k.startswith("totals") or k.startswith("alternate_totals"):
-                return (MarketType.TOTAL, "game")
-            if k.startswith("team_totals") or k.startswith("alternate_team_totals"):
-                return (MarketType.TEAM_TOTAL, "team")
-            # player props (NFL/NBA/MLB/NHL + aliases)
-            if k.startswith("player_") or k.startswith("batter_") or k.startswith("pitcher_"):
-                return (MarketType.PLAYER_PROPS, "player")
-            # soccer extras
-            if k in ("h2h_3_way",) or k.startswith("h2h_3_way_") or k in ("draw_no_bet", "double_chance"):
-                return (MarketType.H2H, "game")
-            if k == "btts":
-                return (MarketType.TOTAL, "game")
-            # default: skip unknowns cleanly
-            return (None, "game")
+        home = None
+        away = None
+        for competitor in event.competitors:
+            if competitor.role == "home":
+                home = competitor.name
+            elif competitor.role == "away":
+                away = competitor.name
 
         def normalize_outcome_name(mkt_type: MarketType, name: str, desc: Optional[str]) -> str:
             n = (name or "").strip().lower()
@@ -395,14 +557,15 @@ class TheOddsApiAdapter(OddsFeed):
                 if not provider_key:
                     continue
 
-                mkt_type, scope = classify_market(provider_key)
+                mkt_type, scope = self.classify_market(provider_key)
                 if mkt_type is None:
                     continue
 
-                period = detect_period(provider_key)
+                period = self.detect_period(provider_key)
                 bucket_key = (mkt_type, period, scope, None, provider_key)
                 if bucket_key not in market_buckets:
                     market_buckets[bucket_key] = Market(
+                        sport=event.sport_key,
                         market_type=mkt_type,
                         period=period,
                         scope=scope,
@@ -445,9 +608,50 @@ class TheOddsApiAdapter(OddsFeed):
                     market_buckets[bucket_key].outcomes.append(op)
 
         markets = [m for m in market_buckets.values() if m.outcomes]
+        print("Constructed EventOdds object:\n")
+        print(str(EventOdds(event=event, markets=markets)) + "\n\n")
         return EventOdds(event=event, markets=markets)
 
     # ------------------------ Helpers ------------------------
+
+    def detect_period(self, provider_market_key: str) -> Period:
+            # Only map the ones present in your enum; put others in meta.
+            if provider_market_key.endswith("_q1"):
+                return Period.Q1
+            if provider_market_key.endswith("_q2"):
+                return Period.Q2
+            if provider_market_key.endswith("_q3"):
+                return Period.Q3
+            if provider_market_key.endswith("_q4"):
+                return Period.Q4
+            if provider_market_key.endswith("_h1"):
+                return Period.H1
+            if provider_market_key.endswith("_h2"):
+                return Period.H2
+            if provider_market_key.endswith("_ot"):
+                return Period.OT
+            return Period.FULL_GAME
+
+    def classify_market(self, provider_market_key: str) -> Tuple[MarketType, str]:
+            k = provider_market_key
+            if k.startswith("h2h"):
+                return (MarketType.H2H, "game")
+            if k.startswith("spreads") or k.startswith("alternate_spreads"):
+                return (MarketType.SPREAD, "game")
+            if k.startswith("totals") or k.startswith("alternate_totals"):
+                return (MarketType.TOTAL, "game")
+            if k.startswith("team_totals") or k.startswith("alternate_team_totals"):
+                return (MarketType.TEAM_TOTAL, "team")
+            # player props (NFL/NBA/MLB/NHL + aliases)
+            if k.startswith("player_") or k.startswith("batter_") or k.startswith("pitcher_"):
+                return (MarketType.PLAYER_PROPS, "player")
+            # soccer extras
+            if k in ("h2h_3_way",) or k.startswith("h2h_3_way_") or k in ("draw_no_bet", "double_chance"):
+                return (MarketType.H2H, "game")
+            if k == "btts":
+                return (MarketType.TOTAL, "game")
+            # default: skip unknowns cleanly
+            return (None, "game")
 
     def _resolve_query_sports(self, q: FeedQuery) -> List[SportKey]:
         sports: List[SportKey] = []
@@ -459,128 +663,166 @@ class TheOddsApiAdapter(OddsFeed):
                     sports.append(SportKey(s))
         return sports
 
-    def _compute_markets_param(self, internal_sport: SportKey, q: FeedQuery) -> str:
+    def is_events_endpoint_valid(self, provider_market_key: str) -> bool:
         """
-        Build the comma-separated provider market keys for this query.
-        When q.markets is None => include ALL:
-          - base (h2h/spreads/totals)
-          - soccer: h2h_3_way
-          - team_totals + alternates
-          - additional period variants
-          - ALL player props (standard + alternate) supported for that sport
-        If q.periods is provided, compose/limit to those period suffixes where applicable.
+        Check if a provider market key is valid for the events endpoint.
+        
+        Returns True if the market key:
+        - Contains 'player', 'batter', or 'pitcher' (player props)
+        - Contains any period suffix from period_map (except full_game)
+        - Is in the global additional_markets list
+        
+        Args:
+            provider_market_key: The provider market key to check (e.g., "h2h_q1", "player_points")
+            
+        Returns:
+            True if valid for events endpoint, False otherwise
         """
-        # Shortcuts into mapping
-        m = self.mapping
-        market_map = m.get("marketType_map", {})
-        add = m.get("additional_markets", {}) or {}
-        period_map = m.get("period_map", {}) or {}
-        period_ext = period_map.get("_extended_recommended", {}) or {}
+        # Check for player props keywords
+        player_keywords = ["player", "batter", "pitcher"]
+        if any(keyword in provider_market_key for keyword in player_keywords):
+            return True
+        
+        # Check for period suffixes (excluding full_game which is empty string)
+        period_suffixes = []
+        for period_key, suffix in self.mapping.get("period_map", {}).items():
+            if period_key != "full_game" and suffix:  # Skip full_game (empty string)
+                period_suffixes.append(suffix)
+        
+        if any(suffix in provider_market_key for suffix in period_suffixes):
+            return True
+        
+        # Check against global additional markets
+        global_additional = self.mapping.get("additional_markets", {}).get("global", [])
+        if provider_market_key in global_additional:
+            return True
+        
+        return False
 
-        def period_suffix(p: Period) -> str:
-            key = p.value if hasattr(p, "value") else str(p)
-            if key in period_map and isinstance(period_map[key], str):
-                return period_map[key]
-            if key in period_ext:
-                return period_ext[key]
-            return "" if p == Period.FULL_GAME else ""
-
-        # Build set of required market keys
-        market_keys: List[str] = []
-
-        # Helper to add base + optional period suffix
-        def add_base_with_periods(base_key: str):
-            if q.periods:
-                for p in q.periods:
-                    suf = period_suffix(p)
-                    market_keys.append(base_key + (suf or ""))
-            else:
-                market_keys.append(base_key)
-
-        # 1) If explicit markets requested
+    def _compute_markets_params(self, internal_sport: SportKey, q: FeedQuery) -> List[str]:
+        """
+        Build list of provider market keys for this query.
+        Returns all requested markets with proper period composition.
+        """
         if q.markets:
-            for mt in q.markets:
-                mt_key = mt.value if hasattr(mt, "value") else str(mt)
-                if mt == MarketType.PLAYER_PROPS:
-                    pack = (m.get("player_props", {}) or {}).get(internal_sport.value)
-                    if pack:
-                        market_keys.extend(pack.get("standard", []) or [])
-                        market_keys.extend(pack.get("alternate", []) or [])
-                else:
-                    base = market_map.get(mt_key)
-                    if base:
-                        add_base_with_periods(base)
-                        # related alternates for spreads/totals/team_totals
-                        if base == "spreads":
-                            if q.periods:
-                                for p in q.periods:
-                                    suf = period_suffix(p)
-                                    market_keys.append("alternate_spreads" + (suf or ""))
-                            else:
-                                market_keys.append("alternate_spreads")
-                        if base == "totals":
-                            if q.periods:
-                                for p in q.periods:
-                                    suf = period_suffix(p)
-                                    market_keys.append("alternate_totals" + (suf or ""))
-                            else:
-                                market_keys.append("alternate_totals")
-                        if base == "team_totals":
-                            if q.periods:
-                                for p in q.periods:
-                                    suf = period_suffix(p)
-                                    market_keys.append("team_totals" + (suf or ""))
-                                    market_keys.append("alternate_team_totals" + (suf or ""))
-                            else:
-                                market_keys.extend(["team_totals", "alternate_team_totals"])
-            # h2h_3_way if user explicitly asked H2H and sport supports it (mainly soccer)
-            if MarketType.H2H in q.markets and internal_sport in [SportKey.FOOTBALL]:  # Only for soccer/football
-                if q.periods:
-                    for p in q.periods:
-                        suf = period_suffix(p)
-                        market_keys.append("h2h_3_way" + (suf or ""))
-                else:
-                    market_keys.append("h2h_3_way")
-
-        # 2) No markets provided => include ALL
+            return self._get_explicit_markets(internal_sport, q)
         else:
-            # base
-            for base in ("h2h", "spreads", "totals"):
-                add_base_with_periods(base)
-            # h2h 3-way (only for soccer/football)
-            if internal_sport in [SportKey.FOOTBALL]:  # Only for soccer
-                if q.periods:
-                    for p in q.periods:
-                        suf = period_suffix(p)
-                        market_keys.append("h2h_3_way" + (suf or ""))
-                else:
-                    market_keys.append("h2h_3_way")
-            # alternates + team totals + period variants (ALL)
-            if q.periods:
-                for p in q.periods:
-                    suf = period_suffix(p)
-                    market_keys.append("alternate_spreads" + (suf or ""))
-                    market_keys.append("alternate_totals" + (suf or ""))
-                    market_keys.append("team_totals" + (suf or ""))
-                    market_keys.append("alternate_team_totals" + (suf or ""))
+            return self._get_all_markets(internal_sport, q)
+
+    def _get_explicit_markets(self, internal_sport: SportKey, q: FeedQuery) -> List[str]:
+        """Get markets for explicit market types requested in query."""
+        market_keys = []
+        
+        for market_type in q.markets:
+            if market_type == MarketType.PLAYER_PROPS:
+                market_keys.extend(self._get_player_props_markets(internal_sport))
             else:
-                market_keys.extend(["alternate_spreads", "alternate_totals", "team_totals", "alternate_team_totals"])
-                # Include every period variant available
-                market_keys.extend(add.get("period_variants", []) or [])
-            # player props (standard + alternate) for this sport
-            pack = (m.get("player_props", {}) or {}).get(internal_sport.value)
-            if pack:
-                market_keys.extend(pack.get("standard", []) or [])
-                market_keys.extend(pack.get("alternate", []) or [])
+                market_keys.extend(self._get_base_market_variants(market_type, q.periods))
+                
+        # Add soccer-specific 3-way markets for H2H requests
+        if MarketType.H2H in q.markets and internal_sport == SportKey.FOOTBALL:
+            market_keys.extend(self._get_market_with_periods("h2h_3_way", q.periods))
+            
+        return self._deduplicate_markets(market_keys)
 
-            # Also include global additional markets (draw_no_bet, double_chance, btts, etc.)
-            market_keys.extend(add.get("global", []) or [])
+    def _get_all_markets(self, internal_sport: SportKey, q: FeedQuery) -> List[str]:
+        """Get all available markets when no specific markets requested."""
+        market_keys = []
+        
+        # Base markets
+        base_markets = ["h2h", "spreads", "totals"]
+        for base in base_markets:
+            market_keys.extend(self._get_market_with_periods(base, q.periods))
+            
+        # Soccer-specific markets
+        if internal_sport == SportKey.FOOTBALL:
+            market_keys.extend(self._get_market_with_periods("h2h_3_way", q.periods))
+            
+        # Alternate and team total markets
+        alternate_markets = ["alternate_spreads", "alternate_totals", "team_totals", "alternate_team_totals"]
+        for alt_market in alternate_markets:
+            market_keys.extend(self._get_market_with_periods(alt_market, q.periods))
+            
+        # Additional markets from mapping
+        market_keys.extend(self._get_additional_markets(q.periods))
+        
+        # Player props
+        market_keys.extend(self._get_player_props_markets(internal_sport))
+        
+        return self._deduplicate_markets(market_keys)
 
-        # Deduplicate while preserving order
+    def _get_base_market_variants(self, market_type: MarketType, periods: Optional[List[Period]]) -> List[str]:
+        """Get base market and its variants (alternates, team totals)."""
+        market_keys = []
+        base_key = self.mapping.get("marketType_map", {}).get(market_type.value)
+        
+        if not base_key:
+            return market_keys
+            
+        # Add base market with periods
+        market_keys.extend(self._get_market_with_periods(base_key, periods))
+        
+        # Add related alternate markets
+        if base_key == "spreads":
+            market_keys.extend(self._get_market_with_periods("alternate_spreads", periods))
+        elif base_key == "totals":
+            market_keys.extend(self._get_market_with_periods("alternate_totals", periods))
+        elif base_key == "team_totals":
+            market_keys.extend(self._get_market_with_periods("team_totals", periods))
+            market_keys.extend(self._get_market_with_periods("alternate_team_totals", periods))
+            
+        return market_keys
+
+    def _get_market_with_periods(self, base_key: str, periods: Optional[List[Period]]) -> List[str]:
+        """Generate market keys with period suffixes."""
+        if not periods:
+            return [base_key]
+            
+        market_keys = []
+        for period in periods:
+            suffix = self._get_period_suffix(period)
+            market_keys.append(base_key + suffix)
+            
+        return market_keys
+
+    def _get_period_suffix(self, period: Period) -> str:
+        """Get period suffix for market composition."""
+        period_map = self.mapping.get("period_map", {})
+        suffix = period_map.get(period.value, "")
+        return suffix if suffix else ""
+
+    def _get_player_props_markets(self, internal_sport: SportKey) -> List[str]:
+        """Get all player props markets for the sport."""
+        player_props = self.mapping.get("player_props", {}).get(internal_sport.value, {})
+        market_keys = []
+        
+        market_keys.extend(player_props.get("standard", []))
+        market_keys.extend(player_props.get("alternate", []))
+        
+        return market_keys
+
+    def _get_additional_markets(self, periods: Optional[List[Period]]) -> List[str]:
+        """Get additional markets from mapping."""
+        additional = self.mapping.get("additional_markets", {})
+        market_keys = []
+        
+        # Global additional markets
+        market_keys.extend(additional.get("global", []))
+        
+        # Period variants (only if no specific periods requested)
+        if not periods:
+            market_keys.extend(additional.get("period_variants", []))
+            
+        return market_keys
+
+    def _deduplicate_markets(self, market_keys: List[str]) -> List[str]:
+        """Remove duplicates while preserving order."""
         seen = set()
-        deduped = []
-        for k in market_keys:
-            if k and k not in seen:
-                seen.add(k)
-                deduped.append(k)
-        return ",".join(deduped)
+        deduplicated = []
+        
+        for key in market_keys:
+            if key and key not in seen:
+                seen.add(key)
+                deduplicated.append(key)
+                
+        return deduplicated

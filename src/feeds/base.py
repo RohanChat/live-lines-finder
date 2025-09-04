@@ -7,6 +7,9 @@ from .query import FeedQuery
 class OddsFeed(ABC):
     """Snapshot/REST-style interface."""
 
+    @abstractmethod
+    def provider_key(self, key: Union[SportKey, Period, MarketType, Market, Region]) -> str: ...
+
     # capabilities
     @abstractmethod
     def list_sports(self) -> List[SportKey]: ...
@@ -14,6 +17,7 @@ class OddsFeed(ABC):
     def list_bookmakers(self) -> List[Bookmaker]: ...
     @abstractmethod
     def list_markets(self, sport: Optional[SportKey] = None) -> List[MarketType]: ...
+
     @abstractmethod
     def get_events(self, q: FeedQuery) -> List[Event]: ...
 
@@ -25,10 +29,7 @@ class OddsFeed(ABC):
     @abstractmethod
     def _normalize_event(self, raw) -> Event: ...
     @abstractmethod
-    def _normalize_event_odds(self, raw_event, raw_odds, q: FeedQuery) -> EventOdds: ...
-
-    @abstractmethod
-    def provider_key(self, key: Union[SportKey, Period, MarketType, Market, Region]) -> str: ...
+    def _normalize_event_odds(self, event: Event, raw_odds) -> EventOdds: ...
 
 class SgpSupport:
     def supports_sgp(self) -> bool: return False
