@@ -3,6 +3,9 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional, List, Dict
 from datetime import datetime
+import orjson
+from pydantic import BaseModel, Field, ConfigDict, computed_field, field_serializer, model_validator
+from ..utils.utils import _iso_utc_z
 
 class SportKey(str, Enum):
     NFL = "americanfootball_nfl"
@@ -42,20 +45,27 @@ class MarketType(str, Enum):
     TEAM_TOTAL = "team_total"
     PLAYER_PROPS = "player_props"
 
-@dataclass
-class Bookmaker:
+
+class Base(BaseModel):
+    model_config = ConfigDict(
+        use_enum_values=True,
+        extra="forbid"
+    )
+
+
+class Bookmaker(Base):
     key: str
     title: Optional[str] = None
     source_id: Optional[str] = None
 
-@dataclass
-class Competitor:
+
+class Competitor(Base):
     name: str
     role: str  # "home" | "away" | "draw"
     team_id: Optional[str] = None
 
-@dataclass
-class OutcomePrice:
+
+class OutcomePrice(Base):
     outcome_key: str           # "home"/"away"/"draw"/"over"/"under"/player name
     price_american: Optional[int] = None
     price_decimal: Optional[float] = None
@@ -63,26 +73,43 @@ class OutcomePrice:
     last_update: Optional[datetime] = None
     link: Optional[str] = None
     bookmaker_key: Optional[str] = None
-    meta: Dict = field(default_factory=dict)
+    meta: Dict = Field(default_factory=dict)
 
-@dataclass
-class Market:
+    @field_serializer("last_update")
+    def serialize_last_update(self, dt: Optional[datetime], _info):
+        return _iso_utc_z(dt)
+
+
+class Market(Base):
     market_type: MarketType
     sport: SportKey
     period: Period
     alternate: Optional[bool] = None
     scope: Optional[str] = None       # "game" | "team" | "player"
     subject_id: Optional[str] = None  # team_id or player_id
-    outcomes: List[OutcomePrice] = field(default_factory=list)
-    meta: Dict = field(default_factory=dict)
-    
-    # Backward compatibility property
+    outcomes: List[OutcomePrice] = Field(default_factory=list)
+    meta: Dict = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_and_strip_computed_fields(cls, data):
+        if isinstance(data, dict):
+            d = dict(data)
+            if "market_type" not in d and "market_key" in d:
+                # let Pydantic coerce this string to MarketType
+                d["market_type"] = d["market_key"]
+            d.pop("market_key", None)  # remove output-only field for strict input
+            return d
+        return data
+
+    @computed_field
     @property
     def market_key(self) -> str:
-        return self.market_type.value
+        mt = self.market_type
+        return mt.value if isinstance(mt, Enum) else str(mt)
 
-@dataclass
-class Event:
+
+class Event(Base):
     event_id: str
     sport_key: SportKey
     league: Optional[str]
@@ -90,10 +117,14 @@ class Event:
     status: str
     competitors: List[Competitor]
     venue: Optional[str] = None
-    meta: Dict = field(default_factory=dict)
+    meta: Dict = Field(default_factory=dict)
 
-@dataclass
-class EventOdds:
+    @field_serializer("start_time")
+    def serialize_start_time(self, dt: datetime, _info):
+        return _iso_utc_z(dt)
+
+
+class EventOdds(Base):
     event: Event
     markets: List[Market]
 
@@ -107,16 +138,20 @@ class DeltaType(str, Enum):
     BOOK_CLEAR = "book_clear"
     HEARTBEAT = "heartbeat"
 
-@dataclass
-class FeedDelta:
+
+class FeedDelta(Base):
     type: DeltaType
     event_id: Optional[str]
     payload: Dict
     received_at: datetime
 
+    @field_serializer("received_at")
+    def serialize_received_at(self, dt: datetime, _info):
+        return _iso_utc_z(dt)
+
 # SGP
-@dataclass
-class SgpLeg:
+
+class SgpLeg(Base):
     event_id: str
     market_type: MarketType
     outcome_key: str
@@ -125,15 +160,15 @@ class SgpLeg:
     player_id: Optional[str] = None
     team_id: Optional[str] = None
 
-@dataclass
-class SgpQuoteRequest:
+
+class SgpQuoteRequest(Base):
     bookmaker: str
     legs: List[SgpLeg]
     stake: Optional[float] = None
-    extra: Dict = field(default_factory=dict)
+    extra: Dict = Field(default_factory=dict)
 
-@dataclass
-class SgpQuoteResponse:
+
+class SgpQuoteResponse(Base):
     bookmaker: str
     price_american: Optional[int]
     price_decimal: Optional[float]

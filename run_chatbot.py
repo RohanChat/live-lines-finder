@@ -3,14 +3,15 @@ from config.config import Config
 from src.feeds.models import SportKey
 from src.database import init_db
 from src.feeds.api.the_odds_api import TheOddsApiAdapter as TheOddsAPI
-from src.analysis.odds_processor import OddsProcessor
 from src.chatbot.core import ChatbotCore
 from src.messaging.mock_client.bot import MockMessagingClient
 from src.messaging.imessage.bot import iMessageBot 
 from src.feeds.query import FeedQuery
 import os
-
-from src.messaging.telegram.bot import TelegramBot
+import logging
+logging.basicConfig(level=logging.DEBUG,
+                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+# from src.messaging.telegram.bot import TelegramBot
 
 def main():
     # telegram_bot = TelegramBot(token=Config.TELEGRAM_BOT_TOKEN)
@@ -36,6 +37,13 @@ def main():
         type=str,
         default=Config.MOCK_CHAT_ID,
         help="Set a chat id: ONLY FOR TESTING PURPOSES. This will be used by the mock client to simulate a chat environment."
+    )
+    parser.add_argument(
+        '--feeds',
+        type=str,
+        nargs='+',
+        default=Config.ACTIVE_ODDS_PROVIDERS,
+        help="List of odds feeds to use (space-separated)."
     )
 
     args = parser.parse_args()
@@ -63,6 +71,13 @@ def main():
         # Use the mock client for testing purposes
         platform = MockMessagingClient(chat_id=args.chat_id)
 
+    if args.feeds:
+        print(f"[INFO] Using the following odds feeds: {', '.join(args.feeds)}")
+        feeds = args.feeds
+    else:
+        print("[WARNING] No odds feeds specified. Using default feeds.")
+        feeds = Config.ACTIVE_ODDS_PROVIDERS
+
     if not platform or not product_id:
         print("[ERROR] Platform or mode not configured correctly. Exiting.")
         return
@@ -71,7 +86,7 @@ def main():
 
     core = ChatbotCore(
       platform=platform,
-      provider_name=Config.ACTIVE_ODDS_PROVIDERS,
+      provider_names=feeds,
       openai_api_key=Config.OPENAI_API_KEY,
       model=Config.OPENAI_MODEL,
       product_id=product_id

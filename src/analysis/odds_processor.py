@@ -17,7 +17,7 @@ from itertools import product
 from src.feeds.base import OddsFeed
 from src.feeds.api.the_odds_api import TheOddsApiAdapter as TheOddsAPI
 from .base import AnalysisEngine
-from src.utils.odds_utils import implied_probability, american_to_decimal, decimal_to_american
+from utils.utils import implied_probability, american_to_decimal, decimal_to_american
 
 class OddsProcessor(AnalysisEngine):
     """Process and plot prop markets for an event"""

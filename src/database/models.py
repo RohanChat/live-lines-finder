@@ -16,6 +16,8 @@ class User(Base):
     telegram_chat_id = Column(BigInteger, unique=True, nullable=True, index=True)
     imessage_chat_id = Column(BigInteger, nullable=True)
     stripe_customer_id = Column(Text, unique=True, nullable=True)
+    state = Column(Text, nullable=True)
+    region = Column(Text, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(UTC))
     updated_at = Column(DateTime, default=lambda: datetime.now(UTC), onupdate=func.now())
 
@@ -36,7 +38,6 @@ class UserSubscription(Base):
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
-    stripe_subscription_id = Column(Text, nullable=True)
     price_id = Column(Text, nullable=True)
     quantity = Column(BigInteger, default=1)
     current_period_end = Column(DateTime, nullable=True)

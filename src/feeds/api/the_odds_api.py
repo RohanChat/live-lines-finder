@@ -22,7 +22,7 @@ from src.feeds.models import (
     Region
 )
 from src.feeds.query import FeedQuery
-from src.utils.odds_utils import american_to_decimal
+from ...utils.utils import american_to_decimal
 
 
 class TheOddsApiAdapter(OddsFeed):
@@ -293,6 +293,10 @@ class TheOddsApiAdapter(OddsFeed):
         
         else:
             markets_str = ""
+            if MarketType.PLAYER_PROPS in q.markets:
+                events = self.get_events(q)
+                for event in events:
+                    return self.get_event_odds(event, q)
             if q.markets:
                 for market in q.markets:
                     mkt_str = self.provider_key(market)

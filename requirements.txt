@@ -22,3 +22,5 @@ supabase
 graphql-ws
 requests
 python-dotenv
+pydantic
+orjson

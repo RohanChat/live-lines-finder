@@ -17,8 +17,7 @@ from src.messaging.base import BaseMessagingClient
 from src.feeds.base import OddsFeed
 from src.feeds.api.the_odds_api import TheOddsApiAdapter
 from src.feeds.api.unabated_api import UnabatedApiAdapter
-from src.feeds.models import SportKey, MarketType, EventOdds
-from src.chatbot.handlers import get_best_bets
+from src.feeds.models import Event, SportKey, MarketType, EventOdds
 from src.analysis.base import AnalysisEngine
 from src.feeds.query import FeedQuery
 
@@ -94,6 +93,7 @@ class ChatbotCore:
         # Responses API conversation tracking (simple)
         self.conversations: Dict[str, str] = {}  # chat_id -> conversation_id
         logger.debug("ChatbotCore initialized with %d analysis engines", len(self.engines))
+        logger.debug("Active odds providers: %s", ", ".join([f.__class__.__name__ for f in self.feeds]))
 
     def create_feed_adapter(self, name: str) -> OddsFeed:
         if name == "theoddsapi":
@@ -115,29 +115,91 @@ class ChatbotCore:
             {
                 "type": "function",
                 "function": {
-                    "name": "best_picks",
-                    "description": "Return top picks in the next X hours",
+                    "name": "list_sports",
+                    "description": "List all of the available sports for the feed as SportKey values",
                     "parameters": {
                         "type": "object",
-                        "properties": {
-                            "hours": {"type": "integer", "default": 24}
-                        }
+                        "properties": {}
                     }
                 }
             },
             {
                 "type": "function",
                 "function": {
-                    "name": "build_parlay",
-                    "description": "Build a high-value parlay with N legs over the next X hours",
+                    "name": "list_bookmakers",
+                    "description": "List all of the available bookmakers for the feed",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {}
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "list_sports",
+                    "description": "List all of the available sports for the feed",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {}
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "list_markets",
+                    "description": "List all of the available markets for the feed, optionally filtered by sport",
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "legs": {"type": "integer", "default": 4},
-                            "hours": {"type": "integer", "default": 24}
+                            "sport": {
+                                "type": "string",
+                                "description": "SportKey enum value",
+                            }
                         }
-                    }
-                }
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_events",
+                    "description": "Get events matching a specific query",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": FeedQuery.model_json_schema()
+                        }
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_event_odds",
+                    "description": "Get odds for a specific event matching the event or query",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "event": Event.model_json_schema(),
+                            "query": FeedQuery.model_json_schema()
+                        }
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_odds",
+                    "description": "Get odds for events matching a specific query",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": FeedQuery.model_json_schema()
+                        }
+                    },
+                },
             }
         ]
 
@@ -293,7 +355,7 @@ class ChatbotCore:
 
 Return a JSON object with these fields:
 {
-  "sports": ["NBA", "NFL", "MLB", "NHL", "NCAAF", "NCAAB", "WNBA", "MMA"],
+  "sports": ["NBA", "NFL", "MLB", "NHL", "NCAAF", "NCAAB", "WNBA", "MMA", "FOOTBALL", "BOXING", "TENNIS"],
   "teams": ["NORMALIZED full team names"],
   "players": ["full player names"], 
   "markets": ["H2H", "SPREAD", "TOTAL", "PLAYER_PROPS"],
