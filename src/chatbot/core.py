@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from functools import wraps
-import json
+import json, redis
+from types import SimpleNamespace
 import os
 import logging
 from datetime import datetime, timedelta, UTC
@@ -20,6 +21,8 @@ from src.feeds.api.unabated_api import UnabatedApiAdapter
 from src.feeds.models import Event, SportKey, MarketType, EventOdds
 from src.analysis.base import AnalysisEngine
 from src.feeds.query import FeedQuery
+from src.feeds.models import Event, Competitor
+
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +95,7 @@ class ChatbotCore:
             self.openai_client = None
         # Responses API conversation tracking (simple)
         self.conversations: Dict[str, str] = {}  # chat_id -> conversation_id
+        self.last_response_id: Dict[str, str] = {}  # chat_id -> last response id
         logger.debug("ChatbotCore initialized with %d analysis engines", len(self.engines))
         logger.debug("Active odds providers: %s", ", ".join([f.__class__.__name__ for f in self.feeds]))
 
@@ -110,98 +114,666 @@ class ChatbotCore:
     # ------------------------------------------------------------------
     # OpenAI helpers
     # ------------------------------------------------------------------
+
+    def _debug_response(self, tag, resp):
+        """Unified debug helper (single implementation)."""
+        try:
+            items = getattr(resp, "output", None) or []
+            fcs = [it for it in items if getattr(it, "type", None) == "function_call"]
+            logger.debug(
+                f"[{tag}] conv={getattr(getattr(resp,'conversation',None),'id',None)} "
+                f"resp_id={getattr(resp,'id',None)} "
+                f"output_text={getattr(resp,'output_text',None)!r} "
+                f"function_calls={[getattr(fc,'id',None) or getattr(fc,'call_id',None) for fc in fcs]} "
+                f"raw_types={[getattr(it,'type',None) for it in items]}"
+            )
+        except Exception:
+            logger.exception(f"[{tag}] debug failed")
+
+
     def _openai_tools(self):
+        # Use your Pydantic v2 models
+        FEEDQUERY_SCHEMA = FeedQuery.model_json_schema()
+        FEEDQUERY_PARAMS = {
+            "type": "object",
+            "additionalProperties": True,
+            "properties": FEEDQUERY_SCHEMA.get("properties", {}),
+            "title": FEEDQUERY_SCHEMA.get("title", "FeedQuery"),
+        }
+
+        EMPTY_OBJ = {"type": "object", "properties": {}}
+
+        GET_EVENT_ODDS_PARAMS = {
+            "type": "object",
+            "additionalProperties": True,
+            "properties": {
+                "event_id": {"type": "string"},
+                "query": FEEDQUERY_SCHEMA,
+            },
+            "required": ["event_id"],
+        }
+
         return [
             {
                 "type": "function",
-                "function": {
-                    "name": "list_sports",
-                    "description": "List all of the available sports for the feed as SportKey values",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {}
-                    }
-                }
+                "name": "list_sports",
+                "description": "List supported sports (SportKey values).",
+                "parameters": EMPTY_OBJ,
             },
             {
                 "type": "function",
-                "function": {
-                    "name": "list_bookmakers",
-                    "description": "List all of the available bookmakers for the feed",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {}
-                    }
-                }
+                "name": "list_bookmakers",
+                "description": "List supported bookmakers.",
+                "parameters": EMPTY_OBJ,
             },
             {
                 "type": "function",
-                "function": {
-                    "name": "list_sports",
-                    "description": "List all of the available sports for the feed",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {}
-                    }
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "list_markets",
-                    "description": "List all of the available markets for the feed, optionally filtered by sport",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "sport": {
-                                "type": "string",
-                                "description": "SportKey enum value",
-                            }
+                "name": "list_markets",
+                "description": "List markets; optionally scoped by sport.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "sport": {
+                            "type": "string",
+                            "description": "SportKey (e.g., 'basketball_nba')",
                         }
                     },
                 },
             },
             {
                 "type": "function",
-                "function": {
-                    "name": "get_events",
-                    "description": "Get events matching a specific query",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "query": FeedQuery.model_json_schema()
-                        }
-                    },
-                },
+                "name": "get_events",
+                "description": "Find upcoming events matching the query (maps to feed.get_events).",
+                # Flattened FeedQuery (no 'query' wrapper)
+                "parameters": FEEDQUERY_PARAMS,
             },
             {
                 "type": "function",
-                "function": {
-                    "name": "get_event_odds",
-                    "description": "Get odds for a specific event matching the event or query",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "event": Event.model_json_schema(),
-                            "query": FeedQuery.model_json_schema()
-                        }
-                    },
-                },
+                "name": "get_event_odds",
+                "description": "Get odds for a single event (maps to feed.get_event_odds).",
+                "parameters": GET_EVENT_ODDS_PARAMS,
             },
             {
                 "type": "function",
-                "function": {
-                    "name": "get_odds",
-                    "description": "Get odds for events matching a specific query",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "query": FeedQuery.model_json_schema()
-                        }
-                    },
-                },
-            }
+                "name": "get_odds",
+                "description": "Get odds for many events matching the query (maps to feed.get_odds).",
+                # Flattened FeedQuery (no 'query' wrapper)
+                "parameters": FEEDQUERY_PARAMS,
+            },
         ]
+
+    
+    def run_turn(self, user_input: str, chat_id: str) -> str:
+        conv_id = self.conversations.get(chat_id)
+
+        # ---------- First request (user message) ----------
+        create_args = dict(
+            model=self.model,
+            instructions=Config.SYSTEM_PROMPT,
+            input=[{"role": "user", "content": [{"type": "input_text", "text": user_input}]}],
+            tools=self._openai_tools(),
+            tool_choice="auto",
+        )
+        if conv_id:
+            create_args["conversation"] = conv_id
+
+        # Log the exact model input payload (redact any obvious secrets if needed)
+        try:
+            safe_args = {k: v for k, v in create_args.items() if k not in {"openai_api_key"}}
+            logger.debug("[model-input][first-turn] chat_id=%s conversation=%s payload=%s", chat_id, conv_id, json.dumps(safe_args, default=str)[:8000])
+        except Exception:
+            logger.exception("Failed to serialize model input for logging")
+
+        # Log the outbound model request (truncated if huge)
+        try:
+            import copy as _copy, json as _json
+            _safe_args = _copy.deepcopy(create_args)
+            # Remove api key references implicitly via client (not in dict) and large tool schemas truncation
+            tools_repr = []
+            for t in _safe_args.get('tools', [])[:10]:  # cap
+                tools_repr.append({k: (v if k != 'parameters' else '...schema omitted...') for k, v in t.items()})
+            _safe_args['tools'] = tools_repr
+            payload_txt = _json.dumps(_safe_args, default=str)
+            if len(payload_txt) > 8000:
+                payload_txt = payload_txt[:8000] + f"...TRUNCATED({len(payload_txt)} chars total)"  # keep log concise
+            logger.debug("\n===== MODEL REQUEST (initial) chat_id=%s =====\n%s\n===== END MODEL REQUEST =====", chat_id, payload_txt)
+        except Exception:
+            logger.exception("Failed to log model request payload")
+
+        resp = self.openai_client.responses.create(**create_args)
+        self._debug_response("first", resp)
+
+        # Save conversation if present
+        if getattr(resp, "conversation", None) and getattr(resp.conversation, "id", None):
+            self.conversations[chat_id] = resp.conversation.id
+
+        # Always save response.id for bridging
+        if not getattr(resp, "id", None):
+            return "Error: server didn’t return a response id."
+        self.last_response_id[chat_id] = resp.id
+
+        # ---------- Tool loop ----------
+        tool_calls = self.collect_tool_calls(resp)
+        while tool_calls:
+            # Execute ALL pending calls from *this* response
+            pending_ids = [self._fc_id(fc) for fc in tool_calls]
+            logger.debug(f"[tool-loop] pending function_call ids: {pending_ids}")
+            results = [self.execute_tool_call(fc) for fc in tool_calls]
+            result_ids = [r.get("call_id") for r in results]
+            logger.debug(f"[tool-loop] produced outputs for call_ids: {result_ids}")
+
+            # ------------------------------------------------------------------
+            # Fallback: deep raw scan for ANY function/tool call ids that were not
+            # captured by collect_tool_calls (SDK structural variance safeguard).
+            # If we find additional ids, emit stub outputs so the API is satisfied
+            # and log loudly for later forensic improvement.
+            # ------------------------------------------------------------------
+            try:
+                raw_missing_ids = []
+                try:
+                    if hasattr(resp, "model_dump"):
+                        raw_repr = resp.model_dump()
+                    elif hasattr(resp, "to_dict"):
+                        raw_repr = resp.to_dict()
+                    else:
+                        raw_repr = None
+                except Exception:
+                    raw_repr = None
+
+                def _gather(o, out: set):
+                    try:
+                        if o is None:
+                            return
+                        if isinstance(o, dict):
+                            otype = o.get("type")
+                            cid = o.get("id") or o.get("call_id")
+                            # Treat only genuine call_* ids; ignore placeholders and internal fc_ ids.
+                            if (
+                                (
+                                    (otype in {"function_call", "tool_call"}) and cid and isinstance(cid, str) and cid.startswith("call_")
+                                )
+                                or (
+                                    cid and isinstance(cid, str) and cid.startswith("call_") and (
+                                        "arguments" in o or "function" in o or "name" in o
+                                    )
+                                )
+                            ) and cid not in {"call_id"}:
+                                out.add(cid)
+                            for v in o.values():
+                                _gather(v, out)
+                            return
+                        if isinstance(o, (list, tuple)):
+                            for v in o:
+                                _gather(v, out)
+                            return
+                        # object fallback
+                        otype = getattr(o, "type", None)
+                        cid = getattr(o, "id", None) or getattr(o, "call_id", None)
+                        if (
+                            (
+                                (otype in {"function_call", "tool_call"}) and cid and isinstance(cid, str) and cid.startswith("call_")
+                            )
+                            or (
+                                cid and isinstance(cid, str) and cid.startswith("call_") and hasattr(o, "arguments")
+                            )
+                        ) and cid not in {"call_id"}:
+                            out.add(cid)
+                        for attr in ("content", "output", "parts", "items"):
+                            if hasattr(o, attr):
+                                _gather(getattr(o, attr), out)
+                    except Exception:
+                        pass
+
+                all_ids = set(pending_ids)
+                if raw_repr is not None:
+                    extra_ids = set()
+                    _gather(raw_repr, extra_ids)
+                    # Regex sweep over stringified payload to catch any orphan 'call_' ids that aren't structured
+                    try:
+                        import re, json as _json
+                        payload_txt = _json.dumps(raw_repr, separators=(",", ":"))[:500000]  # cap size
+                        regex_ids = set(re.findall(r'"(call_[A-Za-z0-9_]+)"', payload_txt))
+                        for rid in regex_ids:
+                            if rid not in extra_ids:
+                                extra_ids.add(rid)
+                    except Exception:
+                        pass
+                    raw_missing_ids = [
+                        cid for cid in sorted(extra_ids)
+                        if cid not in all_ids and isinstance(cid, str) and cid.startswith("call_") and cid not in {"call_id"}
+                    ]
+                if raw_missing_ids:
+                    logger.error(
+                        f"[tool-loop][raw-scan] Detected additional function_call ids not captured structurally: {raw_missing_ids}. Emitting filtered stub outputs."
+                    )
+                    for mid in raw_missing_ids:
+                        results.append({"call_id": mid, "output": json.dumps({"warning": "raw_scan_stub_output", "note": "Call not captured structurally; investigate collect_tool_calls."})})
+                        pending_ids.append(mid)
+                # Update result_ids including stubs
+                result_ids = [r.get("call_id") for r in results]
+            except Exception:
+                logger.exception("[tool-loop][raw-scan] fallback raw scan failed")
+
+            # Backfill any missing outputs with an explicit error payload so API never complains
+            missing = [pid for pid in pending_ids if pid not in result_ids]
+            if missing:
+                logger.error(f"[tool-loop] Missing outputs for call ids {missing}; generating stub error outputs.")
+                for mid in missing:
+                    results.append({"call_id": mid, "output": json.dumps({"error": "missing_execution_output"})})
+
+            # Final safety: ensure no None call_id slips through
+            filtered_results = []
+            for r in results:
+                cid = r.get("call_id")
+                if not cid:
+                    logger.error("[tool-loop] Dropping result without call_id (avoid fabricating).")
+                    continue
+                if not (isinstance(cid, str) and cid.startswith("call_") and cid not in {"call_id"}):
+                    logger.debug(f"[tool-loop] Skipping non-call_* id from outputs: {cid}")
+                    continue
+                filtered_results.append(r)
+            results = filtered_results
+
+            follow_inputs = [
+                {
+                    "type": "function_call_output",
+                    "call_id": r["call_id"],
+                    "output": r["output"],
+                }
+                for r in results
+            ]
+            logger.debug(f"[tool-loop] sending function_call_output ids: {[fi['call_id'] for fi in follow_inputs]}")
+
+            # Log follow-up model input (function_call_output bridging)
+            try:
+                logger.debug(
+                    "[model-input][follow-up] chat_id=%s prev_resp=%s call_ids=%s payload=%s",
+                    chat_id,
+                    self.last_response_id[chat_id],
+                    [fi['call_id'] for fi in follow_inputs],
+                    json.dumps({"input": follow_inputs}, default=str)[:8000]
+                )
+            except Exception:
+                logger.exception("Failed to serialize follow-up input for logging")
+
+            # Log follow-up submission with function_call_output items
+            try:
+                import json as _json
+                preview = [
+                    {"call_id": fi['call_id'], "output_len": len(fi.get('output',''))}
+                    for fi in follow_inputs
+                ]
+                logger.debug("===== MODEL FOLLOW-UP SUBMISSION chat_id=%s prev_resp=%s outputs=%s =====", chat_id, self.last_response_id[chat_id], preview)
+            except Exception:
+                logger.exception("Failed logging follow-up submission")
+
+            follow = self.openai_client.responses.create(
+                model=self.model,
+                previous_response_id=self.last_response_id[chat_id],  # <-- point to the SAME response that issued those calls
+                input=follow_inputs,
+                tools=self._openai_tools(),  # keep tools available for additional calls
+                tool_choice="auto",
+                # NOTE: Do NOT pass conversation together with previous_response_id (mutually exclusive per API)
+            )
+
+            if getattr(follow, "id", None):
+                self.last_response_id[chat_id] = follow.id
+            resp = follow
+            tool_calls = self.collect_tool_calls(resp)
+
+
+        # ---------- Final text ----------
+        return resp.output_text or "Error: No response generated."
+
+
+
+    def _debug_response(self, tag, resp):
+        try:
+            items = getattr(resp, "output", None) or []
+            fcs = [it for it in items if getattr(it, "type", None) == "function_call"]
+            logger.debug(
+                f"[{tag}] conv={getattr(getattr(resp,'conversation',None),'id',None)} "
+                f"resp_id={getattr(resp,'id',None)} "
+                f"output_text={getattr(resp,'output_text',None)!r} "
+                f"tool_calls={[getattr(fc,'id',None) for fc in fcs]} "
+                f"raw_types={[getattr(it,'type',None) for it in items]}"
+            )
+        except Exception:
+            logger.exception(f"[{tag}] debug failed")
+
+    def collect_tool_calls(self, response) -> list:
+        """Return only function_call items requiring outputs.
+        Some SDKs also expose tool_call items; we ignore those for bridging because
+        the Responses API expects outputs strictly for function_call ids."""
+        items = getattr(response, "output", None) or []
+        flat_calls = []
+        nested_calls = []
+        deep_calls = []  # captured via recursive structural traversal (may duplicate)
+
+        # Helper to register a call if not already present (dedupe by id)
+        def _add_call(obj, origin: str):
+            cid = getattr(obj, "id", None) or getattr(obj, "call_id", None)
+            ctype = getattr(obj, "type", None)
+            if ctype not in {"function_call", "tool_call"}:
+                return
+            # Avoid duplicates (some SDK objects may appear both top-level and nested)
+            existing_ids = {getattr(c, "id", None) or getattr(c, "call_id", None) for c in flat_calls + nested_calls}
+            if cid and cid in existing_ids:
+                return
+            (flat_calls if origin == "top" else nested_calls).append(obj)
+
+        # Top-level scan
+        for it in items:
+            _add_call(it, "top")
+            # Dive into .content for nested parts (SDK dependent)
+            content = getattr(it, "content", None)
+            if isinstance(content, list):
+                for part in content:
+                    _add_call(part, "nested")
+
+        # Deep recursive scan through dict / object graph as a safety net.
+        # This addresses any missed calls nested more than one level deep
+        # (some SDK variants may embed calls inside message.content elements).
+        visited_ids = set()
+
+        def _extract(obj):
+            try:
+                if obj is None:
+                    return
+                # Handle primitive containers
+                if isinstance(obj, (str, int, float, bool)):
+                    return
+                # If dict-like
+                if isinstance(obj, dict):
+                    otype = obj.get("type")
+                    cid = obj.get("id") or obj.get("call_id")
+                    if otype in {"function_call", "tool_call"} and cid and cid not in visited_ids:
+                        deep_calls.append(obj)
+                        visited_ids.add(cid)
+                    for v in obj.values():
+                        _extract(v)
+                    return
+                # If list/tuple
+                if isinstance(obj, (list, tuple)):
+                    for v in obj:
+                        _extract(v)
+                    return
+                # Fallback: generic object introspection
+                otype = getattr(obj, "type", None)
+                cid = getattr(obj, "id", None) or getattr(obj, "call_id", None)
+                if otype in {"function_call", "tool_call"} and cid and cid not in visited_ids:
+                    deep_calls.append(obj)
+                    visited_ids.add(cid)
+                # Recurse into common container-ish attributes
+                for attr in ("content", "output", "parts", "items"):
+                    if hasattr(obj, attr):
+                        _extract(getattr(obj, attr))
+            except Exception:
+                # Never let diagnostics traversal break main flow
+                pass
+
+        # Attempt to serialize response to dict if possible for broader traversal
+        raw_dict = None
+        try:
+            if hasattr(response, "model_dump"):
+                raw_dict = response.model_dump()
+            elif hasattr(response, "to_dict"):
+                raw_dict = response.to_dict()
+        except Exception:
+            raw_dict = None
+
+        _extract(items)
+        if raw_dict:
+            _extract(raw_dict)
+
+        # Merge deep_calls into primary call list (ensuring no duplicates)
+        existing_ids = {getattr(c, 'id', None) or getattr(c, 'call_id', None) for c in flat_calls + nested_calls}
+        for dc in deep_calls:
+            cid = dc.get("id") if isinstance(dc, dict) else (getattr(dc, 'id', None) or getattr(dc, 'call_id', None))
+            if not cid or cid in existing_ids:
+                continue
+            # Represent dict deep call as a simple lightweight shim object for uniform downstream handling
+            if isinstance(dc, dict):
+                # Create a minimal shim with attribute access
+                class _Shim:  # local ephemeral
+                    def __init__(self, d):
+                        self.__dict__.update(d)
+                dc_obj = _Shim(dc)
+            else:
+                dc_obj = dc
+            nested_calls.append(dc_obj)
+            existing_ids.add(cid)
+
+        calls = flat_calls + nested_calls
+
+        if calls:
+            logger.debug(
+                "[collect_tool_calls] captured %d calls (top=%d nested=%d deep_extra=%d) -> ids=%s types=%s all_output_types=%s deep_only_ids=%s", 
+                len(calls), len(flat_calls), len(nested_calls), len(deep_calls),
+                [getattr(c, 'id', None) or getattr(c, 'call_id', None) for c in calls],
+                [getattr(c, 'type', None) for c in calls],
+                [getattr(it, 'type', None) for it in items],
+                [ (dc.get('id') if isinstance(dc, dict) else (getattr(dc,'id',None) or getattr(dc,'call_id',None))) for dc in deep_calls ]
+            )
+        else:
+            logger.debug(
+                "[collect_tool_calls] no callable items found. output_types=%s raw_item_reprs_sample=%s", 
+                [getattr(it, 'type', None) for it in items],
+                [repr(items[i])[:120] for i in range(min(3, len(items)))]
+            )
+        return calls
+
+    def _fc_id(self, fc):
+        """Return the externally valid function_call id (call_*), never the internal fc_* id.
+
+        Some SDK objects expose both an internal id (fc_...) and the actual call id (call_...).
+        The Responses API expects we echo back the call_* identifier. This function attempts
+        multiple extraction strategies before falling back. If we can't find a call_* id we
+        return whatever exists so upstream logging can surface the anomaly, but downstream
+        filtering will drop non-call_* outputs and the raw scan will still attempt stubs.
+        """
+        try:
+            # First try model_dump for a stable dict view
+            if hasattr(fc, "model_dump"):
+                d = fc.model_dump()
+                for key in ("call_id", "id"):
+                    cid = d.get(key)
+                    if isinstance(cid, str) and cid.startswith("call_"):
+                        return cid
+                # Fallback: scan values for a call_* token
+                for v in d.values():
+                    if isinstance(v, str) and v.startswith("call_"):
+                        return v
+        except Exception:
+            pass
+        # Attribute access preference: call_id over id
+        cid_attr = getattr(fc, "call_id", None)
+        if isinstance(cid_attr, str) and cid_attr.startswith("call_"):
+            return cid_attr
+        id_attr = getattr(fc, "id", None)
+        if isinstance(id_attr, str) and id_attr.startswith("call_"):
+            return id_attr
+        # Last resort: return whichever exists (likely fc_*) for logging/diagnostics
+        return cid_attr or id_attr
+
+    def _fc_name(self, fc):
+        return getattr(fc, "name", None) or getattr(getattr(fc, "function", None), "name", None)
+
+    def _fc_args(self, fc):
+        raw = getattr(fc, "arguments", None) or getattr(getattr(fc, "function", None), "arguments", None)
+        import json
+        return json.loads(raw or "{}")
+
+
+    def create_responses(self, **kwargs):
+        return self.openai_client.responses.create(**kwargs)
+    
+    def execute_tool_call(self, fc) -> dict:
+        """Execute a single function_call item safely, always returning an output.
+
+        Guarantees returning a mapping with the original call_id so the
+        Responses API never complains about missing tool outputs."""
+        feed = self.main_feed
+        call_id = self._fc_id(fc)
+        name = self._fc_name(fc)
+        try:
+            args = self._fc_args(fc)
+        except Exception as e:
+            logger.exception(f"Failed to parse arguments for call {call_id}: {e}")
+            return {"call_id": call_id or "unknown_call", "output": json.dumps({"error": f"arg_parse_failed: {e}"})}
+
+        # Safety: ensure we have a call_id; if not, fabricate one (still won't match server's expectation,
+        # but we log loudly so we can debug rather than silently sending None)
+        if not call_id:
+            logger.error(f"Function call missing id/name={name} - cannot safely bridge; sending placeholder.")
+        try:
+            # Helper to serialize and truncate large outputs
+            def _pack(data):
+                raw = json.dumps(data)
+                limit = getattr(Config, "MAX_TOOL_OUTPUT_CHARS", 45000)
+                if len(raw) > limit:
+                    truncated = raw[:limit]
+                    meta_suffix = json.dumps({
+                        "truncated": True,
+                        "original_length": len(raw),
+                        "kept": limit,
+                        "note": "Output truncated to fit context window. Adjust query (narrow markets/events) for full data."
+                    })
+                    # Ensure JSON remains valid: wrap truncated string with metadata
+                    safe = json.dumps({"data_prefix": truncated, "meta": json.loads(meta_suffix)})
+                    return safe
+                return raw
+
+            if name == "get_odds":
+                q = FeedQuery.model_validate(self._normalize_feedquery_args(args))
+                eos = feed.get_odds(q) or []
+                out = [eo.model_dump() for eo in eos]
+                return {"call_id": call_id, "output": _pack(out)}
+
+            if name == "get_events":
+                q = FeedQuery.model_validate(self._normalize_feedquery_args(args))
+                events = feed.get_events(q) or []
+                out = [e.model_dump() for e in events]
+                return {"call_id": call_id, "output": _pack(out)}
+
+            if name == "get_event_odds":
+                event_id = args.get("event_id")
+                if not event_id:
+                    raise ValueError("event_id required")
+                q_raw = args.get("query", {}) or {}
+                q = FeedQuery.model_validate(self._normalize_feedquery_args(q_raw))
+                event = self._get_event_by_id(event_id)
+                eo = feed.get_event_odds(event, q)
+                out = eo.model_dump()
+                return {"call_id": call_id, "output": _pack(out)}
+
+            if name == "list_bookmakers":
+                out = [getattr(b, "value", str(b)) for b in (feed.list_bookmakers() or [])]
+                return {"call_id": call_id, "output": _pack(out)}
+
+            if name == "list_markets":
+                sport = args.get("sport")
+                sport_enum = SportKey(sport) if sport else None
+                out = [m.value for m in feed.list_markets(sport_enum)]
+                return {"call_id": call_id, "output": _pack(out)}
+
+            if name == "list_sports":
+                out = [s.value for s in (feed.list_sports() or [])]
+                return {"call_id": call_id, "output": _pack(out)}
+
+            return {"call_id": call_id, "output": json.dumps({"error": f"Unknown tool {name}"})}
+        except Exception as e:
+            logger.exception(f"Tool execution failed for {name} ({call_id}): {e}")
+            return {"call_id": call_id, "output": json.dumps({"error": f"execution_failed: {str(e)}"})}
+
+
+    def _event_from_minimal(self, ev: Dict[str, Any]):
+        """Option A: re-fetch by id; Option B: construct a thin Event object your adapter accepts."""
+        # simplest: try by id
+        try:
+            q = FeedQuery(event_ids=[ev["event_id"]], limit=1)
+            found = self.main_feed.get_events(q) or []
+            if found:
+                return found[0]
+        except Exception:
+            pass
+        return Event(
+            event_id=ev["event_id"],
+            sport_key=SportKey(ev["sport_key"]),
+            start_time=ev.get("start_time"),
+            status=ev.get("status"),
+            competitors=[Competitor(name=ev.get("home","TBD"), role="home"),
+                        Competitor(name=ev.get("away","TBD"), role="away")],
+            league=ev.get("league")
+        )
+    
+    def _coerce_enum(self, val, EnumCls, mapping: dict[str, str] | None = None):
+        """Try to coerce val to EnumCls. Accepts existing enums, their value strings,
+        and optional alias mapping ('NFL' -> 'americanfootball_nfl')."""
+        if val is None:
+            return None
+        if isinstance(val, EnumCls):
+            return val
+        s = str(val).strip()
+        if mapping and s in mapping:
+            s = mapping[s]
+        try:
+            return EnumCls(s)  # works with exact .value strings
+        except Exception:
+            # also try name lookup (e.g., 'H2H' -> MarketType.H2H)
+            try:
+                return EnumCls[s]  # type: ignore[index]
+            except Exception:
+                raise TypeError(f"Cannot coerce {val!r} to {EnumCls.__name__}")
+
+    def _coerce_list(self, seq, fn):
+        if not seq:
+            return seq
+        return [fn(v) for v in seq]
+
+    def _normalize_feedquery_args(self, args: dict) -> dict:
+        """Coerce tool-call args into proper enums expected by FeedQuery & adapters."""
+        from src.feeds.models import SportKey, MarketType, Period, Region
+
+        # Accept some common aliases (you can add more as needed)
+        sport_alias = {
+            "NFL": SportKey.NFL.value,
+            "NCAAF": SportKey.NCAAF.value,
+            "NBA": SportKey.NBA.value,
+            "NCAAB": SportKey.NCAAB.value,
+            "WNBA": SportKey.WNBA.value,
+            "MLB": SportKey.MLB.value,
+            "NHL": SportKey.NHL.value,
+            "MMA": SportKey.MMA.value,
+            "SOCCER": SportKey.FOOTBALL.value,
+            "FOOTBALL": SportKey.FOOTBALL.value,
+            "BOXING": SportKey.BOXING.value,
+            "TENNIS": SportKey.TENNIS.value,
+        }
+
+        out = dict(args or {})
+
+        # Coerce sports/markets/periods/regions
+        if "sports" in out and out["sports"] is not None:
+            out["sports"] = self._coerce_list(
+                out["sports"], lambda v: self._coerce_enum(v, SportKey, sport_alias)
+            )
+        if "markets" in out and out["markets"] is not None:
+            out["markets"] = self._coerce_list(
+                out["markets"], lambda v: self._coerce_enum(v, MarketType)
+            )
+        if "periods" in out and out["periods"] is not None:
+            out["periods"] = self._coerce_list(
+                out["periods"], lambda v: self._coerce_enum(v, Period)
+            )
+        if "regions" in out and out["regions"] is not None:
+            out["regions"] = self._coerce_list(
+                out["regions"], lambda v: self._coerce_enum(v, Region)
+            )
+
+        # event_ids/teams/players/bookmakers can remain strings
+        return out
+
 
     def ask_question(self, question: str, chat_id: Optional[str] = None) -> str:
         """Ask a question with conversation context."""
@@ -239,8 +811,9 @@ class ChatbotCore:
         
         try:
             # Use Chat Completions API with conversation history
-            response = self.openai_client.chat.completions.create(
+            response = self.openai_client.responses.create(
                 model=self.model,
+                instructions=Config.SYSTEM_PROMPT,
                 messages=messages,
                 tools=self._openai_tools(),
                 tool_choice="auto"
@@ -324,10 +897,8 @@ class ChatbotCore:
     async def _handle_message(self, update, context) -> None:
         """Handle general messages."""
         text = update.message.text.strip() or ""
-        if text.startswith("/"):
-            return
         chat_id = str(update.effective_chat.id)
-        answer = self.ask_question(text, chat_id=chat_id)
+        answer = self.run_turn(text, chat_id)
         await self.platform.send_message(update.effective_chat.id, answer)
 
     def reset_conversation(self, chat_id: str):

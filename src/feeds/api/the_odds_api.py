@@ -103,6 +103,7 @@ class TheOddsApiAdapter(OddsFeed):
             self._provider_to_internal_market_type[provider_key] = mt
 
     def provider_key(self, key: Union[SportKey, Period, MarketType, Market, Region]) -> str:
+
         if isinstance(key, SportKey):
             keys = self._internal_to_provider_sport.get(key, [])
             if not keys:
@@ -133,6 +134,18 @@ class TheOddsApiAdapter(OddsFeed):
             if not provider_val:
                 raise KeyError(f"No provider region mapped for Region={key}")
             return provider_val
+        
+        if isinstance(key, str):
+            # Attempt to coerce to known enums before failing
+            for enum_cls in (SportKey, Period, MarketType, Region):
+                try:
+                    return self.provider_key(enum_cls(key))  # value match
+                except Exception:
+                    try:
+                        return self.provider_key(enum_cls[key])  # name match
+                    except Exception:
+                        continue
+            raise TypeError(f"Unsupported string for provider_key coercion: {key}")
 
         raise TypeError(f"Unsupported type for provider_key: {type(key).__name__}")
     

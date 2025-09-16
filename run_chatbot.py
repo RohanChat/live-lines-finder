@@ -9,8 +9,33 @@ from src.messaging.imessage.bot import iMessageBot
 from src.feeds.query import FeedQuery
 import os
 import logging
-logging.basicConfig(level=logging.DEBUG,
-                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+from pathlib import Path
+
+def _init_logging():
+    """Initialize console + file logging exactly once with absolute path.
+    Ensures all modules inheriting from root get the file handler.
+    """
+    root_logger = logging.getLogger()
+    if not root_logger.handlers:  # Only configure if nothing configured yet
+        logging.basicConfig(
+            level=logging.DEBUG,
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        )
+    try:
+        project_root = Path(__file__).resolve().parent
+        log_dir = project_root / 'logs'
+        log_dir.mkdir(exist_ok=True)
+        logfile = log_dir / 'chatbot.log'
+        if not any(isinstance(h, logging.FileHandler) and getattr(h, 'baseFilename', '') == str(logfile) for h in root_logger.handlers):
+            fh = logging.FileHandler(logfile, mode='a', encoding='utf-8')
+            fh.setLevel(logging.DEBUG)
+            fh.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+            root_logger.addHandler(fh)
+            root_logger.info('[logging] File handler attached -> %s', logfile)
+    except Exception as e:
+        logging.getLogger(__name__).exception('Failed to initialize file logging: %s', e)
+
+_init_logging()
 # from src.messaging.telegram.bot import TelegramBot
 
 def main():
@@ -61,7 +86,12 @@ def main():
     if args.platform == 'telegram':
         if args.chat_id:
             print("YOU CAN ONLY SET A CHAT ID WHEN USING THE MOCK CLIENT. THIS WILL BE IGNORED.")
-        platform = TelegramBot(token=Config.TELEGRAM_BOT_TOKEN)
+        try:
+            from src.messaging.telegram.bot import TelegramBot  # local import to avoid unused import when not needed
+            platform = TelegramBot(token=Config.TELEGRAM_BOT_TOKEN)
+        except Exception as e:
+            logging.getLogger(__name__).error("Telegram platform requested but unavailable: %s", e)
+            return
     elif args.platform == 'imessage':
         if args.chat_id:
             print("YOU CAN ONLY SET A CHAT ID WHEN USING THE MOCK CLIENT. THIS WILL BE IGNORED.")

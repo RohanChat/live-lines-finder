@@ -38,6 +38,8 @@ class Config:
     STRIPE_WEBHOOK_SECRET_LIVE = os.getenv('STRIPE_WEBHOOK_SECRET_LIVE')
     STRIPE_SUBSCRIPTION_PRICE_ID = os.getenv('STRIPE_SUBSCRIPTION_PRICE_ID')
 
+    SYSTEM_PROMPT = os.getenv('SYSTEM_PROMPT', 'You are a helpful sports betting assistant.')
+
     # keys for the different products and their product ids from stripe
     PRODUCT_IDS = {
         'betting_assistant': {

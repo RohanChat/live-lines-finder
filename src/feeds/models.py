@@ -48,7 +48,7 @@ class MarketType(str, Enum):
 
 class Base(BaseModel):
     model_config = ConfigDict(
-        use_enum_values=True,
+        use_enum_values=False,
         extra="forbid"
     )
 
