@@ -102,14 +102,17 @@ class TheOddsApiAdapter(OddsFeed):
             self._internal_to_provider_market_type[mt] = provider_key
             self._provider_to_internal_market_type[provider_key] = mt
 
-    def provider_key(self, key: Union[SportKey, Period, MarketType, Market, Region]) -> str:
+    def provider_key(self, key: Union[SportKey, Period, MarketType, Market, Region]):
 
         if isinstance(key, SportKey):
             keys = self._internal_to_provider_sport.get(key, [])
             if not keys:
                 raise KeyError(f"No provider keys mapped for SportKey={key}")
-            return keys[0]  # canonical choice
-
+            if key == SportKey.FOOTBALL or key == SportKey.TENNIS:
+                return keys
+            else:
+                return keys[0]  # canonical choice
+        
         if isinstance(key, Period):
             suffix = self._internal_to_provider_period.get(key)
             if suffix is None:
@@ -188,7 +191,7 @@ class TheOddsApiAdapter(OddsFeed):
         - Find the first sport with any events, fetch one event's odds, collect bookmakers.
         """
         for sk in self.list_sports():
-            provider_keys = self._internal_to_provider_sport_keys(sk)
+            provider_keys = self._internal_to_provider_sport(sk)
             for psk in provider_keys:
                 # get events
                 events = self._get(f"sports/{psk}/events")
@@ -242,20 +245,36 @@ class TheOddsApiAdapter(OddsFeed):
         for sport in sports:
             params = {}
             if q.start_time_from:
-                params["commenceTimeFrom"] = q.start_time_from.isoformat()
+                params["commenceTimeFrom"] = q.start_time_from.isoformat().replace("+00:00", "Z")
             if q.start_time_to:
-                params["commenceTimeTo"] = q.start_time_to.isoformat()
-            provider_key = self.provider_key(sport)
-            raw = self._get(f"sports/{provider_key}/events", params=params)
-            for e in raw or []:
-                ev = self._normalize_event(e)
-                # optional team filter
-                if q.teams:
-                    teams_lower = {t.lower() for t in q.teams}
-                    names = {c.name.lower() for c in ev.competitors}
-                    if not teams_lower & names:
-                        continue
-                events.append(ev)
+                params["commenceTimeTo"] = q.start_time_to.isoformat().replace("+00:00", "Z")
+
+            if sport == SportKey.FOOTBALL or sport == SportKey.TENNIS:
+                provider_keys = self.provider_key(sport)
+                for provider_key in provider_keys:
+                    raw = self._get(f"sports/{provider_key}/events", params=params)
+                    for e in raw or []:
+                        ev = self._normalize_event(e)
+                        # optional team filter
+                        if q.teams:
+                            teams_lower = {t.lower() for t in q.teams}
+                            names = {c.name.lower() for c in ev.competitors}
+                            if not teams_lower & names:
+                                continue
+                        events.append(ev)
+
+            else:
+                provider_key = self.provider_key(sport)
+                raw = self._get(f"sports/{provider_key}/events", params=params)
+                for e in raw or []:
+                    ev = self._normalize_event(e)
+                    # optional team filter
+                    if q.teams:
+                        teams_lower = {t.lower() for t in q.teams}
+                        names = {c.name.lower() for c in ev.competitors}
+                        if not teams_lower & names:
+                            continue
+                    events.append(ev)
 
         if q.limit:
             print("Limiting events to: ", q.limit)
@@ -309,7 +328,8 @@ class TheOddsApiAdapter(OddsFeed):
             if MarketType.PLAYER_PROPS in q.markets:
                 events = self.get_events(q)
                 for event in events:
-                    return self.get_event_odds(event, q)
+                    output_odds.append(self.get_event_odds(event, q))
+                return output_odds
             if q.markets:
                 for market in q.markets:
                     mkt_str = self.provider_key(market)
@@ -317,18 +337,31 @@ class TheOddsApiAdapter(OddsFeed):
                 markets_str = markets_str.rstrip(",")
             if q.sports:
                 for sport in q.sports:
-                    sport_key = self.provider_key(sport)
-                    raw = self._get(f"sports/{sport_key}/odds", params={"markets": markets_str})
+                    if sport == SportKey.FOOTBALL or sport == SportKey.TENNIS:
+                        provider_keys = self.provider_key(sport)
+                        for provider_key in provider_keys:
+                            raw = self._get(f"sports/{provider_key}/odds", params={"markets": markets_str})
+                            print("RAW ODDS FETCHED FROM API")
+                            for event_data in raw:
+                                # First normalize the event info
+                                event = self._normalize_event(event_data)
+                                
+                                # Then normalize the odds for this event
+                                event_odds = self._normalize_event_odds(event=event, raw_odds=event_data)
+                                output_odds.append(event_odds)
+                    else:
+                        sport_key = self.provider_key(sport)
+                        raw = self._get(f"sports/{sport_key}/odds", params={"markets": markets_str})
 
         print("RAW ODDS FETCHED FROM API")
 
         for event_data in raw:
-                    # First normalize the event info
-                    event = self._normalize_event(event_data)
+            # First normalize the event info
+            event = self._normalize_event(event_data)
                     
-                    # Then normalize the odds for this event
-                    event_odds = self._normalize_event_odds(event=event, raw_odds=event_data)
-                    output_odds.append(event_odds)
+            # Then normalize the odds for this event
+            event_odds = self._normalize_event_odds(event=event, raw_odds=event_data)
+            output_odds.append(event_odds)
         
         print("NORMALIZED ODDS: \n" + str(output_odds) + "\n\n")
 
@@ -503,7 +536,7 @@ class TheOddsApiAdapter(OddsFeed):
         output_event = Event(
             event_id=raw.get("id"),
             sport_key=internal_sport,
-            league=None,  # provider encodes competition in sport_key
+            league=raw.get("sport_title"),  # provider encodes competition in sport_key
             start_time=start_dt,
             status=raw.get("completed", False) and "completed" or "upcoming",
             competitors=competitors,

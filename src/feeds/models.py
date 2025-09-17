@@ -113,14 +113,14 @@ class Event(Base):
     event_id: str
     sport_key: SportKey
     league: Optional[str]
-    start_time: datetime
-    status: str
-    competitors: List[Competitor]
+    start_time: Optional[datetime]
+    status: Optional[str]
+    competitors: Optional[List[Competitor]]
     venue: Optional[str] = None
     meta: Dict = Field(default_factory=dict)
 
     @field_serializer("start_time")
-    def serialize_start_time(self, dt: datetime, _info):
+    def serialize_start_time(self, dt: Optional[datetime], _info):
         return _iso_utc_z(dt)
 
 

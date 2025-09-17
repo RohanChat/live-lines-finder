@@ -87,3 +87,9 @@ python src/run_chatbot.py --platform mock --chat_id '+1234567890'
 python src/run_chatbot.py --platform imessage --mode live
 python src/run_chatbot.py --platform telegram --mode live
 ```
+
+**Future developments:**
+ - Live websocket odds feeds to reduce latency and lag during live betting
+ - SGP construction
+ - Sports data MCP implementation for historical and live data, to enhance the model's capabilities
+ - Buildilng advanced analysis engines for the model's toolkit

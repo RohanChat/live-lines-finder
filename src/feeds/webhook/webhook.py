@@ -7,7 +7,7 @@ from ..models import FeedDelta
 
 UpdateHandler = Callable[[FeedDelta], Awaitable[None]]
 
-class WebhookFeed(ABC):
+class WebhookFeed(OddsFeed, ABC):
     def __init__(self) -> None:
         self._on_update: Optional[UpdateHandler] = None
         self._task: Optional[asyncio.Task] = None

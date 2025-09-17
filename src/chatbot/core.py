@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import base64
 from functools import wraps
 import json, redis
 from types import SimpleNamespace
 import os
 import logging
 from datetime import datetime, timedelta, UTC
-from typing import Iterable, Sequence, Dict, Any, Optional, List
+from typing import Iterable, Sequence, Dict, Any, Optional, List, Tuple
+from src.feeds.models import SportKey, MarketType, Period, Region
+
 
 import openai
 
@@ -84,7 +87,7 @@ class ChatbotCore:
         self.platform = platform
         self.provider_names = provider_names
         self.feeds = [self.create_feed_adapter(name) for name in (provider_names if isinstance(provider_names, list) else [provider_names])]
-        self.main_feed = self.feeds[0] if self.feeds else self.create_feed_adapter("unabated")
+        self.main_feed = self.feeds[0] if self.feeds else self.create_feed_adapter(provider_names[0])
         self.engines: list[AnalysisEngine] = list(analysis_engines or [])
         self.model = model
         self.product_id = product_id or Config.PRODUCT_IDS.get('betting_assistant', {}).get('test', 'default')
@@ -111,25 +114,16 @@ class ChatbotCore:
         self.engines.append(engine)
         logger.debug("Added analysis engine: %s", engine.__class__.__name__)
 
+    def start(self) -> None:
+        """Register handlers and start the messaging platform."""
+        # self.platform.register_command_handler("ask", self._handle_ask)
+        # self.platform.register_command_handler("explain", self._handle_explain)
+        self.platform.register_message_handler(lambda msg: True, self._handle_message)
+        self.platform.start()
+
     # ------------------------------------------------------------------
     # OpenAI helpers
     # ------------------------------------------------------------------
-
-    def _debug_response(self, tag, resp):
-        """Unified debug helper (single implementation)."""
-        try:
-            items = getattr(resp, "output", None) or []
-            fcs = [it for it in items if getattr(it, "type", None) == "function_call"]
-            logger.debug(
-                f"[{tag}] conv={getattr(getattr(resp,'conversation',None),'id',None)} "
-                f"resp_id={getattr(resp,'id',None)} "
-                f"output_text={getattr(resp,'output_text',None)!r} "
-                f"function_calls={[getattr(fc,'id',None) or getattr(fc,'call_id',None) for fc in fcs]} "
-                f"raw_types={[getattr(it,'type',None) for it in items]}"
-            )
-        except Exception:
-            logger.exception(f"[{tag}] debug failed")
-
 
     def _openai_tools(self):
         # Use your Pydantic v2 models
@@ -603,16 +597,57 @@ class ChatbotCore:
         raw = getattr(fc, "arguments", None) or getattr(getattr(fc, "function", None), "arguments", None)
         import json
         return json.loads(raw or "{}")
+    
+    def pack_json(self, data: Any) -> str:
+        """Always return a JSON string (no truncation; pagination keeps payloads small)."""
+        return json.dumps(data, ensure_ascii=False)
 
+    def pack_json_with_guard(self, data: Any, *, char_limit: Optional[int] = None) -> str:
+        """Optional safety guard if you still want a hard cap."""
+        limit = char_limit or getattr(Config, "MAX_TOOL_OUTPUT_CHARS", 45000)
+        raw = json.dumps(data, ensure_ascii=False)
+        if len(raw) <= limit:
+            return raw
+        # Fallback wrapper if someone disables pagination by mistake
+        safe = {
+            "data_prefix": raw[:limit],
+            "meta": {
+                "truncated": True,
+                "original_length": len(raw),
+                "kept": limit,
+                "note": "Payload exceeded limit; enable/use pagination."
+            }
+        }
+        return json.dumps(safe, ensure_ascii=False)
 
-    def create_responses(self, **kwargs):
-        return self.openai_client.responses.create(**kwargs)
+    def _b64e(self, d: Dict[str, Any]) -> str:
+        return base64.urlsafe_b64encode(json.dumps(d).encode("utf-8")).decode("ascii")
+
+    def _b64d(self, s: str) -> Dict[str, Any]:
+        return json.loads(base64.urlsafe_b64decode(s.encode("ascii")).decode("utf-8"))
+
+    def _parse_pagination_args(self, args: Dict[str, Any]) -> Tuple[int, Optional[Dict[str, Any]]]:
+        limit = int(args.get("limit") or 1000)
+        limit = max(1, min(limit, getattr(Config, "MAX_PAGE_SIZE", 2000)))  # clamp
+        cursor = args.get("cursor")
+        state = self._b64d(cursor) if cursor else None
+        return limit, state
+
+    def _slice_with_cursor(self, seq: List[Any], limit: int, state: Optional[Dict[str, Any]]) -> Tuple[List[Any], Optional[str]]:
+        """Generic cursor over an in-memory list. Cursor stores the next start index."""
+        start = int(state.get("pos", 0)) if state else 0
+        end = start + limit
+        items = seq[start:end]
+        next_cursor = None
+        if end < len(seq):
+            next_cursor = self._b64e({"pos": end})
+        return items, next_cursor
+
+    def _page_dict(self, items: List[Any], next_cursor: Optional[str]) -> Dict[str, Any]:
+        return {"items": items, "next": next_cursor}
     
     def execute_tool_call(self, fc) -> dict:
-        """Execute a single function_call item safely, always returning an output.
-
-        Guarantees returning a mapping with the original call_id so the
-        Responses API never complains about missing tool outputs."""
+        """Execute a single function_call item with cursor-based pagination."""
         feed = self.main_feed
         call_id = self._fc_id(fc)
         name = self._fc_name(fc)
@@ -620,72 +655,109 @@ class ChatbotCore:
             args = self._fc_args(fc)
         except Exception as e:
             logger.exception(f"Failed to parse arguments for call {call_id}: {e}")
-            return {"call_id": call_id or "unknown_call", "output": json.dumps({"error": f"arg_parse_failed: {e}"})}
+            return {"call_id": call_id or "unknown_call", "output": self.pack_json({"error": f"arg_parse_failed: {e}"})}
 
-        # Safety: ensure we have a call_id; if not, fabricate one (still won't match server's expectation,
-        # but we log loudly so we can debug rather than silently sending None)
         if not call_id:
             logger.error(f"Function call missing id/name={name} - cannot safely bridge; sending placeholder.")
-        try:
-            # Helper to serialize and truncate large outputs
-            def _pack(data):
-                raw = json.dumps(data)
-                limit = getattr(Config, "MAX_TOOL_OUTPUT_CHARS", 45000)
-                if len(raw) > limit:
-                    truncated = raw[:limit]
-                    meta_suffix = json.dumps({
-                        "truncated": True,
-                        "original_length": len(raw),
-                        "kept": limit,
-                        "note": "Output truncated to fit context window. Adjust query (narrow markets/events) for full data."
-                    })
-                    # Ensure JSON remains valid: wrap truncated string with metadata
-                    safe = json.dumps({"data_prefix": truncated, "meta": json.loads(meta_suffix)})
-                    return safe
-                return raw
 
+        try:
+            # ---- get_odds (paged) ----
             if name == "get_odds":
                 q = FeedQuery.model_validate(self._normalize_feedquery_args(args))
-                eos = feed.get_odds(q) or []
-                out = [eo.model_dump() for eo in eos]
-                return {"call_id": call_id, "output": _pack(out)}
+                limit, state = self._parse_pagination_args(args)
 
+                # If your feed supports native paging, use it (preferred)
+                if hasattr(feed, "get_odds_paged"):
+                    rows, next_state = feed.get_odds_paged(q, limit=limit, cursor_state=state)
+                    out = self._page_dict([eo.model_dump() for eo in (rows or [])], self._b64e(next_state) if next_state else None)
+                    return {"call_id": call_id, "output": self.pack_json(out)}
+
+                # Fallback: fetch then slice (works today; swap to native when ready)
+                eos = feed.get_odds(q) or []
+                items, next_cur = self._slice_with_cursor([eo.model_dump() for eo in eos], limit, state)
+                return {"call_id": call_id, "output": self.pack_json(self._page_dict(items, next_cur))}
+
+            # ---- get_events (paged) ----
             if name == "get_events":
                 q = FeedQuery.model_validate(self._normalize_feedquery_args(args))
-                events = feed.get_events(q) or []
-                out = [e.model_dump() for e in events]
-                return {"call_id": call_id, "output": _pack(out)}
+                limit, state = self._parse_pagination_args(args)
 
+                if hasattr(feed, "get_events_paged"):
+                    rows, next_state = feed.get_events_paged(q, limit=limit, cursor_state=state)
+                    out = self._page_dict([e.model_dump() for e in (rows or [])], self._b64e(next_state) if next_state else None)
+                    return {"call_id": call_id, "output": self.pack_json(out)}
+
+                events = feed.get_events(q) or []
+                items, next_cur = self._slice_with_cursor([e.model_dump() for e in events], limit, state)
+                return {"call_id": call_id, "output": self.pack_json(self._page_dict(items, next_cur))}
+
+            # ---- get_event_odds (paged within a big object) ----
             if name == "get_event_odds":
                 event_id = args.get("event_id")
                 if not event_id:
                     raise ValueError("event_id required")
+
                 q_raw = args.get("query", {}) or {}
                 q = FeedQuery.model_validate(self._normalize_feedquery_args(q_raw))
-                event = self._get_event_by_id(event_id)
+                limit, state = self._parse_pagination_args(args)
+
+                # first we constuct a minimal event object from the id and the sport in q
+                event = self._event_from_minimal({"event_id": event_id, "sport_key": q.sports[0]})
+
+
+                # If feed supports native paging for event odds, prefer it
+                if hasattr(feed, "get_event_odds_paged"):
+                    rows, next_state = feed.get_event_odds_paged(event, q, limit=limit, cursor_state=state)
+                    out = self._page_dict([r.model_dump() if hasattr(r, "model_dump") else r for r in (rows or [])],
+                                    self._b64e(next_state) if next_state else None)
+                    return {"call_id": call_id, "output": self.pack_json(out)}
+
+                # Fallback: paginate a large odds object by its list fields (e.g., prices)
                 eo = feed.get_event_odds(event, q)
-                out = eo.model_dump()
-                return {"call_id": call_id, "output": _pack(out)}
+                d = eo.model_dump()
 
+                # Try the common large fields in order; first one found gets paginated.
+                list_fields = ["prices", "bookmakers", "markets", "outcomes"]
+                paged_field = next((f for f in list_fields if isinstance(d.get(f), list)), None)
+
+                if paged_field:
+                    items, next_cur = self._slice_with_cursor(d[paged_field], limit, state)
+                    d[paged_field] = items
+                    out = {"item": d, "next": next_cur}
+                else:
+                    # Nothing large to paginate; return as single item
+                    out = {"item": d, "next": None}
+
+                return {"call_id": call_id, "output": self.pack_json(out)}
+
+            # ---- list_bookmakers (tiny; no paging needed, but allow it for consistency) ----
             if name == "list_bookmakers":
-                out = [getattr(b, "value", str(b)) for b in (feed.list_bookmakers() or [])]
-                return {"call_id": call_id, "output": _pack(out)}
+                limit, state = self._parse_pagination_args(args)
+                arr = [getattr(b, "value", str(b)) for b in (feed.list_bookmakers() or [])]
+                items, next_cur = self._slice_with_cursor(arr, limit, state)
+                return {"call_id": call_id, "output": self.pack_json(self._page_dict(items, next_cur))}
 
+            # ---- list_markets (optional paging) ----
             if name == "list_markets":
                 sport = args.get("sport")
                 sport_enum = SportKey(sport) if sport else None
-                out = [m.value for m in feed.list_markets(sport_enum)]
-                return {"call_id": call_id, "output": _pack(out)}
+                limit, state = self._parse_pagination_args(args)
+                arr = [m.value for m in feed.list_markets(sport_enum)]
+                items, next_cur = self._slice_with_cursor(arr, limit, state)
+                return {"call_id": call_id, "output": self.pack_json(self._page_dict(items, next_cur))}
 
+            # ---- list_sports (optional paging) ----
             if name == "list_sports":
-                out = [s.value for s in (feed.list_sports() or [])]
-                return {"call_id": call_id, "output": _pack(out)}
+                limit, state = self._parse_pagination_args(args)
+                arr = [s.value for s in (feed.list_sports() or [])]
+                items, next_cur = self._slice_with_cursor(arr, limit, state)
+                return {"call_id": call_id, "output": self.pack_json(self._page_dict(items, next_cur))}
 
-            return {"call_id": call_id, "output": json.dumps({"error": f"Unknown tool {name}"})}
+            return {"call_id": call_id, "output": self.pack_json({"error": f"Unknown tool {name}"})}
+
         except Exception as e:
             logger.exception(f"Tool execution failed for {name} ({call_id}): {e}")
-            return {"call_id": call_id, "output": json.dumps({"error": f"execution_failed: {str(e)}"})}
-
+            return {"call_id": call_id, "output": self.pack_json({"error": f"execution_failed: {str(e)}"})}
 
     def _event_from_minimal(self, ev: Dict[str, Any]):
         """Option A: re-fetch by id; Option B: construct a thin Event object your adapter accepts."""
@@ -733,7 +805,6 @@ class ChatbotCore:
 
     def _normalize_feedquery_args(self, args: dict) -> dict:
         """Coerce tool-call args into proper enums expected by FeedQuery & adapters."""
-        from src.feeds.models import SportKey, MarketType, Period, Region
 
         # Accept some common aliases (you can add more as needed)
         sport_alias = {
@@ -773,493 +844,16 @@ class ChatbotCore:
 
         # event_ids/teams/players/bookmakers can remain strings
         return out
-
-
-    def ask_question(self, question: str, chat_id: Optional[str] = None) -> str:
-        """Ask a question with conversation context."""
-        chat_id = chat_id or "default"
-        
-        if not self.openai_client:
-            # Fallback to smart odds if no AI
-            try:
-                return self.get_smart_odds(question)
-            except Exception as e:
-                return f"Error: {e}"
-        
-        # Get odds context if relevant
-        odds_context = ""
-        try:
-            if any(word in question.lower() for word in ["odds", "picks", "bets", "spread", "total", "moneyline"]):
-                odds_context = self.get_smart_odds(question)
-        except Exception as e:
-            logger.warning(f"Failed to get odds context: {e}")
-        
-        # Prepare input with context
-        full_question = f"{question}\n\nOdds Context:\n{odds_context}" if odds_context else question
-        
-        # Simple conversation history management
-        if not hasattr(self, '_manual_history'):
-            self._manual_history = {}
-        if chat_id not in self._manual_history:
-            self._manual_history[chat_id] = []
-        
-        # Add current question to history
-        self._manual_history[chat_id].append({"role": "user", "content": full_question})
-        
-        # Keep only last 10 messages for context
-        messages = self._manual_history[chat_id][-10:]
-        
-        try:
-            # Use Chat Completions API with conversation history
-            response = self.openai_client.responses.create(
-                model=self.model,
-                instructions=Config.SYSTEM_PROMPT,
-                messages=messages,
-                tools=self._openai_tools(),
-                tool_choice="auto"
-            )
-            
-            # Handle response
-            message = response.choices[0].message
-            
-            # Handle tool calls
-            if message.tool_calls:
-                result = self._handle_tool_calls(message.tool_calls)
-                self._manual_history[chat_id].append({"role": "assistant", "content": result})
-                return result
-            
-            content = message.content.strip() if message.content else "No response generated."
-            self._manual_history[chat_id].append({"role": "assistant", "content": content})
-            return content
-            
-        except Exception as e:
-            logger.error(f"OpenAI API error: {e}")
-            # Fallback to odds context if available
-            return odds_context or f"Error: {e}"
-
-    def _handle_tool_calls(self, tool_calls):
-        """Handle tool calls from OpenAI response."""
-        for tool_call in tool_calls:
-            function = tool_call.function
-            if function.name == "best_picks":
-                try:
-                    args = json.loads(function.arguments or "{}")
-                    return self.get_smart_odds("best picks", hours=args.get("hours", 24))
-                except Exception as e:
-                    logger.error(f"Error in best_picks tool: {e}")
-                    return f"Error getting best picks: {e}"
-            elif function.name == "build_parlay":
-                return "Sorry, parlay building is not yet supported with the new feed system."
-        
-        return "Tool call completed"
-
-    def explain_line(self, line_desc: str) -> str:
-        """Ask OpenAI to explain a betting line."""
-        prompt = f"Explain the following betting line in simple terms: {line_desc}"
-        if not self.openai_api_key:
-            logger.warning("OpenAI API key not configured")
-            return "OpenAI API key not configured."
-        resp = self.openai_client.chat.completions.create(
-            model=self.model,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        if not resp.choices:
-            logger.warning("OpenAI API returned an empty choices array for line description: %s", line_desc)
-            return "I'm sorry, I couldn't generate an explanation for the given line."
-        explanation = resp.choices[0].message.content.strip()
-        logger.debug("OpenAI explanation: %s", explanation)
-        return explanation
-
-    # ------------------------------------------------------------------
-    # Messaging integration
-    # ------------------------------------------------------------------
-
-    @require_subscription
-    async def _handle_ask(self, update, context) -> None:  # pragma: no cover - Telegram interface
-        question = " ".join(getattr(context, "args", []) or [])
-        if not question:
-            await self.platform.send_message(update.effective_chat.id, "Please provide a question after /ask")
-            return
-        chat_id = str(update.effective_chat.id)
-        answer = self.ask_question(question, chat_id=chat_id)
-        await self.platform.send_message(update.effective_chat.id, answer)
-
-    @require_subscription
-    async def _handle_explain(self, update, context) -> None:  # pragma: no cover - Telegram interface
-        desc = " ".join(getattr(context, "args", []) or [])
-        if not desc:
-            await self.platform.send_message(update.effective_chat.id, "Provide a line description after /explain")
-            return
-        explanation = self.explain_line(desc)
-        await self.platform.send_message(update.effective_chat.id, explanation)
     
+    # ------------------------------------------------------------------
+    # Messaging platform integration
+    # ------------------------------------------------------------------
+    
+
     @require_subscription
     async def _handle_message(self, update, context) -> None:
         """Handle general messages."""
         text = update.message.text.strip() or ""
         chat_id = str(update.effective_chat.id)
-        answer = self.run_turn(text, chat_id)
+        answer = self.run_turn(text, chat_id=chat_id)
         await self.platform.send_message(update.effective_chat.id, answer)
-
-    def reset_conversation(self, chat_id: str):
-        """Reset conversation context for a specific chat."""
-        self.conversations.pop(chat_id, None)
-        if hasattr(self, '_manual_history'):
-            self._manual_history.pop(chat_id, None)
-        logger.info(f"Reset conversation for chat_id: {chat_id}")
-
-    # ------------------------------------------------------------------
-    # AI-Powered Smart Query Building
-    # ------------------------------------------------------------------
-    
-    def _analyze_query_with_ai(self, question: str) -> Dict[str, Any]:
-        """
-        Use AI to comprehensively analyze a user query and extract all betting intent.
-        Returns structured data about sports, teams, players, markets, timing, etc.
-        """
-        if not self.openai_client:
-            logger.warning("OpenAI client not available, falling back to basic parsing")
-            return self._fallback_query_analysis(question)
-        
-        try:
-            system_prompt = """You are an expert sports betting query analyzer with comprehensive knowledge of ALL team names, nicknames, abbreviations, and variations across ALL sports.
-
-Return a JSON object with these fields:
-{
-  "sports": ["NBA", "NFL", "MLB", "NHL", "NCAAF", "NCAAB", "WNBA", "MMA", "FOOTBALL", "BOXING", "TENNIS"],
-  "teams": ["NORMALIZED full team names"],
-  "players": ["full player names"], 
-  "markets": ["H2H", "SPREAD", "TOTAL", "PLAYER_PROPS"],
-  "timeframe": {
-    "type": "tonight|today|tomorrow|weekend|week|specific_date|general",
-    "hours": 24,
-    "description": "human readable time description"
-  },
-  "intent": "general_picks|team_specific|player_props|market_specific|analysis",
-  "confidence": 0.95
-}
-
-CRITICAL: For teams, ALWAYS return the FULL OFFICIAL NAME that would appear in betting APIs:
-- "Lakers", "LAL", "LA" → "Los Angeles Lakers"
-- "Warriors", "GSW", "Dubs" → "Golden State Warriors"  
-- "Knicks", "NYK" → "New York Knicks"
-- "Sixers", "76ers" → "Philadelphia 76ers"
-- "Cavs" → "Cleveland Cavaliers"
-- "Bucs" → "Tampa Bay Buccaneers"
-- "Chiefs", "KC" → "Kansas City Chiefs"
-- "Pats" → "New England Patriots"
-- "Dodgers", "LAD" → "Los Angeles Dodgers"
-- "Yankees", "NYY" → "New York Yankees"
-- "Sox" (context needed) → "Boston Red Sox" or "Chicago White Sox"
-
-Handle ALL possible team variations intelligently. You know every team in every major sport.
-
-Examples:
-- "Lakers odds tonight" → teams:["Los Angeles Lakers"], sports:["NBA"]
-- "Dubs spread" → teams:["Golden State Warriors"], sports:["NBA"], markets:["SPREAD"]
-- "KC Chiefs this weekend" → teams:["Kansas City Chiefs"], sports:["NFL"]
-- "Pats vs Bills" → teams:["New England Patriots", "Buffalo Bills"], sports:["NFL"]
-
-ALWAYS normalize team names to their full official names for API compatibility."""
-
-            response = self.openai_client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": f"Analyze this betting query: {question}"}
-                ]
-            )
-            
-            content = response.choices[0].message.content.strip()
-            analysis = json.loads(content)
-            
-            logger.info(f"AI query analysis for '{question}': {analysis}")
-            return analysis
-            
-        except Exception as e:
-            logger.warning(f"AI query analysis failed: {e}, falling back to basic parsing")
-            return self._fallback_query_analysis(question)
-    
-    def _fallback_query_analysis(self, question: str) -> Dict[str, Any]:
-        """Minimal fallback when AI is completely unavailable - return generic search."""
-        return {
-            "sports": ["NBA", "NFL", "MLB", "NHL"],  # All major sports
-            "teams": [],
-            "players": [],
-            "markets": ["H2H", "SPREAD", "TOTAL"],
-            "timeframe": {"type": "general", "hours": 24, "description": "next 24 hours"},
-            "intent": "general_picks",
-            "confidence": 0.3  # Very low confidence for generic fallback
-        }
-    
-    def build_smart_query(self, question: str, hours: int = 24) -> FeedQuery:
-        """
-        Parse a user question using AI and build an appropriate FeedQuery.
-        Handles all scenarios: time-based, player props, team-specific, etc.
-        """
-        # Get comprehensive AI analysis
-        analysis = self._analyze_query_with_ai(question)
-        
-        # Convert sports strings to SportKey enums
-        detected_sports = []
-        sport_mapping = {
-            "NFL": SportKey.NFL, "NBA": SportKey.NBA, "MLB": SportKey.MLB, "NHL": SportKey.NHL,
-            "NCAAF": SportKey.NCAAF, "NCAAB": SportKey.NCAAB, "WNBA": SportKey.WNBA, "MMA": SportKey.MMA,
-            "football": SportKey.FOOTBALL, "boxing": SportKey.BOXING, "tennis": SportKey.TENNIS
-        }
-        
-        for sport_str in analysis.get("sports", []):
-            if sport_str in sport_mapping:
-                detected_sports.append(sport_mapping[sport_str])
-        
-        # If no sports detected, use all available sports
-        if not detected_sports:
-            detected_sports = self.main_feed.list_sports()
-        
-        # Convert market strings to MarketType enums
-        detected_markets = []
-        market_mapping = {
-            "H2H": MarketType.H2H, "SPREAD": MarketType.SPREAD, "TOTAL": MarketType.TOTAL,
-            "TEAM_TOTAL": MarketType.TEAM_TOTAL, "PLAYER_PROPS": MarketType.PLAYER_PROPS
-        }
-        
-        for market_str in analysis.get("markets", []):
-            if market_str in market_mapping:
-                detected_markets.append(market_mapping[market_str])
-
-            elif "PLAYER" in market_str:
-                detected_markets.append(MarketType.PLAYER_PROPS)
-        
-        # If no markets detected, use main game markets
-        if not detected_markets:
-            detected_markets = [MarketType.H2H, MarketType.SPREAD, MarketType.TOTAL]
-        
-        # Use AI-detected timeframe or default
-        timeframe = analysis.get("timeframe", {})
-        query_hours = timeframe.get("hours") or hours  # Handle None case
-        
-        # Build time range
-        end_time = datetime.now(UTC) + timedelta(hours=query_hours)
-        
-        # Store analysis for later use in filtering
-        query = FeedQuery(
-            sports=detected_sports,
-            markets=detected_markets,
-            start_time_to=end_time
-        )
-        
-        # Store AI analysis in query for later filtering
-        query._ai_analysis = analysis
-        
-        logger.info(f"Built AI-powered query from '{question}': "
-                   f"sports={[s.value for s in detected_sports]}, "
-                   f"markets={[m.value for m in detected_markets]}, "
-                   f"hours={query_hours}, "
-                   f"teams={analysis.get('teams', [])}, "
-                   f"players={analysis.get('players', [])}")
-        
-        return query
-
-    def start(self) -> None:
-        """Register handlers and start the messaging platform."""
-        # self.platform.register_command_handler("ask", self._handle_ask)
-        # self.platform.register_command_handler("explain", self._handle_explain)
-        self.platform.register_message_handler(lambda msg: True, self._handle_message)
-        self.platform.start()
-
-    def get_smart_odds(self, question: str, hours: int = 24) -> str:
-        """
-        Unified method to get odds based on a natural language question.
-        Now with comprehensive AI-powered analysis and filtering.
-        """
-        try:
-            # Build the query from the question (now fully AI-powered)
-            query = self.build_smart_query(question, hours)
-            analysis = getattr(query, '_ai_analysis', {})
-
-            sports = query.sports
-            event_odds_list: List[EventOdds] = []
-
-            if not sports:
-                logger.info("No sports detected by AI, using all available sports")
-                event_odds_list = self.main_feed.get_odds(query) or []
-            else:
-                # Main feed first, then others
-                feeds_order = [self.main_feed] + [f for f in self.feeds if f is not self.main_feed]
-                feed_support = {feed: set(feed.list_sports() or []) for feed in feeds_order}
-
-                # Assign each requested sport to the first feed that supports it
-                per_feed_sports: Dict[OddsFeed, set] = {}
-                unsupported: set = set()
-
-                for sport in sports:
-                    for feed in feeds_order:
-                        if sport in feed_support[feed]:
-                            per_feed_sports.setdefault(feed, set()).add(sport)
-                            break
-                    else:
-                        unsupported.add(sport)
-
-                # Query each feed once with only the sports it supports
-                for feed, sports_bucket in per_feed_sports.items():
-                    sub_query = FeedQuery(
-                        sports=list(sports_bucket),
-                        markets=query.markets,
-                        start_time_from=getattr(query, "start_time_from", None),
-                        start_time_to=getattr(query, "start_time_to", None),
-                    )
-                    results = feed.get_odds(sub_query) or []
-                    event_odds_list.extend(results)
-
-                # Graceful message if nothing supported
-                if unsupported and not event_odds_list:
-                    timeframe_desc = analysis.get("timeframe", {}).get("description", f"next {hours} hours")
-                    missing = ", ".join(getattr(s, "value", str(s)) for s in unsupported)
-                    return f"Sorry, no provider supports the requested sports: {missing}. Try a different sport or timeframe ({timeframe_desc})."
-            
-            if not event_odds_list:
-                timeframe_desc = analysis.get("timeframe", {}).get("description", f"next {hours} hours")
-                return f"No upcoming games found matching your request for {timeframe_desc}."
-            
-            # Apply AI-powered filtering
-            filtered_odds = self._apply_ai_filters(event_odds_list, analysis)
-            
-            if not filtered_odds:
-                teams = analysis.get("teams", [])
-                players = analysis.get("players", [])
-                if teams or players:
-                    filter_desc = f"teams: {', '.join(teams)}" if teams else f"players: {', '.join(players)}"
-                    return f"Found {len(event_odds_list)} games but none matching {filter_desc}"
-                else:
-                    filtered_odds = event_odds_list
-            
-            return self._format_odds_response(filtered_odds, question, analysis, limit=5)
-            
-        except Exception as e:
-            logger.error(f"Error in get_smart_odds: {e}")
-            return f"Sorry, I couldn't fetch odds right now. Error: {e}"
-    
-    def _apply_ai_filters(self, event_odds_list: List[EventOdds], analysis: Dict[str, Any]) -> List[EventOdds]:
-        """
-        Apply intelligent filtering based on AI analysis of the user query.
-        Handles teams, players, and specific market preferences.
-        """
-        filtered_odds = event_odds_list
-        
-        # Filter by teams if specified
-        teams = analysis.get("teams", [])
-        if teams:
-            filtered_odds = self._filter_odds_by_teams_ai(filtered_odds, teams)
-            logger.info(f"Filtered by teams {teams}: {len(filtered_odds)} games remaining")
-        
-        # Filter by players if specified (for player props)
-        players = analysis.get("players", [])
-        if players:
-            filtered_odds = self._filter_odds_by_players_ai(filtered_odds, players)
-            logger.info(f"Filtered by players {players}: {len(filtered_odds)} games remaining")
-        
-        return filtered_odds
-    
-    def _filter_odds_by_teams_ai(self, event_odds_list: List[EventOdds], team_names: List[str]) -> List[EventOdds]:
-        """
-        Filter odds using AI-detected team names.
-        AI handles ALL team variations - no manual mapping needed!
-        """
-        if not team_names:
-            return event_odds_list
-        
-        filtered = []
-        
-        for event_odds in event_odds_list:
-            competitor_names = [comp.name.lower() for comp in event_odds.event.competitors]
-            
-            # Check if any AI-detected team matches any competitor
-            for team_name in team_names:
-                team_lower = team_name.lower()
-                
-                # AI should have normalized team names, so just do fuzzy matching
-                if any(team_lower in comp_name or comp_name in team_lower 
-                       for comp_name in competitor_names):
-                    filtered.append(event_odds)
-                    break
-        
-        return filtered
-    
-    def _filter_odds_by_players_ai(self, event_odds_list: List[EventOdds], player_names: List[str]) -> List[EventOdds]:
-        """
-        Filter for games involving specific players.
-        This would need roster data or player-team mapping.
-        For now, we'll return games and let the market filtering handle player props.
-        """
-        # TODO: Implement player-to-team mapping for better filtering
-        # For now, return all games as player props are market-specific
-        logger.info(f"Player filtering not yet implemented for: {player_names}")
-        return event_odds_list
-    
-    def _format_odds_response(self, event_odds_list: List[EventOdds], original_question: str, analysis: Dict[str, Any], limit: int = 5) -> str:
-        """Format the odds response for display to the user with AI context."""
-        limited_odds = event_odds_list[:limit]
-        
-        lines = []
-        
-        # Create contextual header based on AI analysis
-        intent = analysis.get("intent", "general_picks")
-        timeframe_desc = analysis.get("timeframe", {}).get("description", "upcoming")
-        teams = analysis.get("teams", [])
-        players = analysis.get("players", [])
-        
-        if players:
-            lines.append(f"🎯 Found {len(event_odds_list)} games with player props for {', '.join(players)} ({timeframe_desc}):")
-        elif teams:
-            lines.append(f"🎯 Found {len(event_odds_list)} games involving {', '.join(teams)} ({timeframe_desc}):")
-        else:
-            lines.append(f"🎯 Found {len(event_odds_list)} {timeframe_desc} games:")
-        
-        for i, event_odds in enumerate(limited_odds, 1):
-            event = event_odds.event
-            
-            home_team = next((c.name for c in event.competitors if c.role == 'home'), 'TBD')
-            away_team = next((c.name for c in event.competitors if c.role == 'away'), 'TBD')
-            
-            # Format game time if available
-            game_time = ""
-            if hasattr(event, 'commence_time') and event.commence_time:
-                game_time = f" - {event.commence_time.strftime('%I:%M %p')}"
-            
-            lines.append(f"\n{i}. **{away_team} @ {home_team}**{game_time}")
-            
-            for market in event_odds.markets:
-                market_name = market.market_key.value.upper()
-                lines.append(f"   📊 {market_name}:")
-                
-                outcomes_by_book = {}
-                for outcome in market.outcomes:
-                    book = outcome.bookmaker_key or "Unknown"
-                    if book not in outcomes_by_book:
-                        outcomes_by_book[book] = []
-                    outcomes_by_book[book].append(outcome)
-                
-                for book_count, (book, outcomes) in enumerate(outcomes_by_book.items()):
-                    if book_count >= 2:  # Limit to 2 bookmakers
-                        break
-                        
-                    outcome_strs = []
-                    for outcome in outcomes:
-                        price_str = f"{outcome.price_american:+}" if outcome.price_american else "N/A"
-                        if outcome.line:
-                            outcome_strs.append(f"{outcome.outcome_key} {outcome.line} ({price_str})")
-                        else:
-                            outcome_strs.append(f"{outcome.outcome_key} ({price_str})")
-                    
-                    if outcome_strs:
-                        lines.append(f"     • {book}: {' | '.join(outcome_strs)}")
-        
-        if len(event_odds_list) > limit:
-            lines.append(f"\n... and {len(event_odds_list) - limit} more games")
-        
-        # Add confidence indicator if AI analysis has low confidence
-        confidence = analysis.get("confidence", 1.0)
-        if confidence < 0.7:
-            lines.append(f"\n💡 Note: Query interpretation confidence: {confidence:.0%}")
-        
-        return "\n".join(lines)
