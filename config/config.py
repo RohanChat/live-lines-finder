@@ -28,7 +28,7 @@ class Config:
     UNABATED_REALTIME_API_REGION = os.getenv('UNABATED_REALTIME_API_REGION')
     UNABATED_DATA_API_URL = os.getenv('UNABATED_DATA_API_URL')
     MOCK_CHAT_ID = os.getenv('MOCK_CHAT_ID')  # Default mock chat ID
-    ACTIVE_ODDS_PROVIDERS = ["theoddsapi"]
+    ACTIVE_ODDS_PROVIDERS = ["unabated", "theoddsapi"]
     REDIS_URL = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
     WEB_APP_API_KEY = os.getenv('WEB_APP_API_KEY')  # Default API key for web app
     
@@ -40,8 +40,11 @@ class Config:
     STRIPE_WEBHOOK_SECRET_LIVE = os.getenv('STRIPE_WEBHOOK_SECRET_LIVE')
     STRIPE_SUBSCRIPTION_PRICE_ID = os.getenv('STRIPE_SUBSCRIPTION_PRICE_ID')
 
-    SYSTEM_PROMPT = os.getenv('SYSTEM_PROMPT', 'You are a helpful sports betting assistant.')
-
+    # Path to the system prompt text file
+    SYSTEM_PROMPT_PATH = os.getenv('SYSTEM_PROMPT_PATH', './config/prompts/system_prompt.txt')
+    with open(SYSTEM_PROMPT_PATH, 'r') as f:
+        SYSTEM_PROMPT = f.read()
+        
     # keys for the different products and their product ids from stripe
     PRODUCTS = {
         'betting_assistant': {
