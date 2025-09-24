@@ -2,7 +2,7 @@ import stripe
 import logging
 from config.config import Config
 from datetime import datetime
-from src.utils.phone_utils import standardize_phone_number, get_phone_variations
+from src.utils.utils import standardize_phone_number, get_phone_variations
 
 logger = logging.getLogger(__name__)
 

@@ -3,6 +3,8 @@ from abc import ABC, abstractmethod
 from typing import Awaitable, Callable, Optional
 from datetime import datetime, UTC
 import asyncio
+
+from ..base import OddsFeed
 from ..models import FeedDelta
 
 UpdateHandler = Callable[[FeedDelta], Awaitable[None]]

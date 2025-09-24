@@ -1,4 +1,5 @@
 import argparse
+from src.chatbot.factory import create_chatbot, create_feed_adapter
 from config.config import Config
 from src.feeds.models import SportKey
 from src.database import init_db
@@ -54,10 +55,10 @@ def main():
 
     if args.mode == 'test':
         print("[INFO] Running in test mode. Using mock client and test product ID.")
-        product_id = Config.PRODUCT_IDS['betting_assistant']['test']  # Use test product ID
+        product = Config.PRODUCTS['betting_assistant']['test']
     elif args.mode == 'live':
         print("[INFO] Running in live mode. Using real client and live product ID.")
-        product_id = Config.PRODUCT_IDS['betting_assistant']['live']
+        product = Config.PRODUCTS['betting_assistant']['live']
 
     if args.platform == 'telegram':
         if args.chat_id:
@@ -84,18 +85,27 @@ def main():
         print("[WARNING] No odds feeds specified. Using default feeds.")
         feeds = Config.ACTIVE_ODDS_PROVIDERS
 
-    if not platform or not product_id:
+    if not platform or not product:
         print("[ERROR] Platform or mode not configured correctly. Exiting.")
         return
     
     init_db()  # Ensure database is initialized before starting the chatbot
 
+    active_feeds = []
+    for feed_name in feeds:
+        try:
+            adapter = create_feed_adapter(feed_name)
+            active_feeds.append(adapter)
+            print(f"[INFO] Initialized feed adapter: {feed_name}")
+        except Exception as e:
+            print(f"[ERROR] Failed to initialize feed adapter '{feed_name}': {e}")
+
     core = ChatbotCore(
       platform=platform,
-      provider_names=feeds,
+      feeds=active_feeds,
       openai_api_key=Config.OPENAI_API_KEY,
       model=Config.OPENAI_MODEL,
-      product_id=product_id
+      product=product
     )
     core.start()
 

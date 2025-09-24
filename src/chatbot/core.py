@@ -9,13 +9,14 @@ import logging
 from datetime import datetime, timedelta, UTC
 from typing import Iterable, Sequence, Dict, Any, Optional, List, Tuple
 from src.feeds.models import SportKey, MarketType, Period, Region
+from src.feeds.webhook.boltodds_webhook import BoltOddsWebhookAdapter
 
 
 import openai
 
 from config.config import Config
 from src.database import get_db_session
-from src.database.models import UserSubscription
+from src.database.models import User, UserSubscription
 from src.database.session import get_user_by_phone
 from src.messaging.base import BaseMessagingClient
 from src.feeds.base import OddsFeed
@@ -25,52 +26,10 @@ from src.feeds.models import Event, SportKey, MarketType, EventOdds
 from src.analysis.base import AnalysisEngine
 from src.feeds.query import FeedQuery
 from src.feeds.models import Event, Competitor
+from src.utils.utils import SubscriptionError, get_redis_client, require_subscription, standardize_phone_number
 
 
 logger = logging.getLogger(__name__)
-
-def require_subscription(fn):
-    @wraps(fn)
-    async def wrapper(self, update, context):
-        # 1. Get the unique chat identifier from the messaging platform.
-        # This works for the mock client, Telegram (integer ID), and iMessage (phone number).
-        chat_id = getattr(update.effective_chat, "id", None) or getattr(update, "chat_id", None)
-        if not chat_id:
-            logger.warning("Could not determine chat_id from update.")
-            return
-
-        db = next(get_db_session())
-        try:
-            # 2. Find the user record using the chat_id.
-            user = get_user_by_phone(db, chat_id)
-
-            # 3. Check if the user exists and has a phone number registered.
-            if not user or not user.phone:
-                await self.platform.send_message(
-                    chat_id,
-                    "Your account is not fully set up. Please register your phone number on our website to continue."
-                )
-                return
-
-            # 4. Check for a specific, active subscription for that user.
-            active_subscription = db.query(UserSubscription).filter(
-                UserSubscription.user_id == user.id,
-                UserSubscription.active == True,
-                UserSubscription.product_id == self.product_id
-            ).first()
-
-            if not active_subscription:
-                await self.platform.send_message(
-                    chat_id,
-                    "🚫 You don't have an active subscription for this service. Please visit our website to subscribe."
-                )
-                return
-
-            # 5. If all checks pass, proceed to the original handler.
-            return await fn(self, update, context)
-        finally:
-            db.close()
-    return wrapper
 
 class ChatbotCore:
     """Coordinate messaging, odds feeds and analysis engines."""
@@ -78,42 +37,36 @@ class ChatbotCore:
     def __init__(
         self,
         platform: BaseMessagingClient,
-        provider_names: Optional[str] = Config.ACTIVE_ODDS_PROVIDERS,
+        feeds: Optional[List[OddsFeed]],
         analysis_engines: Optional[Sequence[AnalysisEngine]] = None,
         openai_api_key: Optional[str] = None,
         model: str = Config.OPENAI_MODEL,
-        product_id: Optional[str] = None
+        product: Optional[Dict[str, str]] = None,
     ) -> None:
         self.platform = platform
-        self.provider_names = provider_names
-        self.feeds = [self.create_feed_adapter(name) for name in (provider_names if isinstance(provider_names, list) else [provider_names])]
-        self.main_feed = self.feeds[0] if self.feeds else self.create_feed_adapter(provider_names[0])
+        self.feeds = feeds
+        self.main_feed = feeds[0]
         self.engines: list[AnalysisEngine] = list(analysis_engines or [])
         self.model = model
-        self.product_id = product_id or Config.PRODUCT_IDS.get('betting_assistant', {}).get('test', 'default')
+        fallback = Config.PRODUCTS.get('betting_assistant', {}).get('test', {})
+        self.product_id  = (product or fallback).get('product_id', 'default')
+        self.payment_url = (product or fallback).get('payment_url', 'oddsmate.ai')
         self.openai_api_key = openai_api_key or Config.OPENAI_API_KEY
         if self.openai_api_key:
             self.openai_client = openai.OpenAI(api_key=self.openai_api_key)
         else:
             self.openai_client = None
         # Responses API conversation tracking (simple)
+        self.redis = get_redis_client()
         self.conversations: Dict[str, str] = {}  # chat_id -> conversation_id
         self.last_response_id: Dict[str, str] = {}  # chat_id -> last response id
         logger.debug("ChatbotCore initialized with %d analysis engines", len(self.engines))
         logger.debug("Active odds providers: %s", ", ".join([f.__class__.__name__ for f in self.feeds]))
 
-    def create_feed_adapter(self, name: str) -> OddsFeed:
-        if name == "theoddsapi":
-            return TheOddsApiAdapter()
-        elif name == "unabated":
-            return UnabatedApiAdapter()
-        else:
-            raise ValueError(f"Unknown odds provider: {name}")
-
     def add_engine(self, engine: AnalysisEngine) -> None:
         self.engines.append(engine)
         logger.debug("Added analysis engine: %s", engine.__class__.__name__)
-
+        
     def start(self) -> None:
         """Register handlers and start the messaging platform."""
         # self.platform.register_command_handler("ask", self._handle_ask)
@@ -177,28 +130,40 @@ class ChatbotCore:
             {
                 "type": "function",
                 "name": "get_events",
-                "description": "Find upcoming events matching the query (maps to feed.get_events).",
+                "description": "Find upcoming events matching the query (maps to feed.get_events_cached).",
                 # Flattened FeedQuery (no 'query' wrapper)
                 "parameters": FEEDQUERY_PARAMS,
             },
             {
                 "type": "function",
                 "name": "get_event_odds",
-                "description": "Get odds for a single event (maps to feed.get_event_odds).",
+                "description": "Get odds for a single event (maps to feed.get_event_odds_cached).",
                 "parameters": GET_EVENT_ODDS_PARAMS,
             },
             {
                 "type": "function",
                 "name": "get_odds",
-                "description": "Get odds for many events matching the query (maps to feed.get_odds).",
+                "description": "Get odds for many events matching the query (maps to feed.get_odds_cached).",
                 # Flattened FeedQuery (no 'query' wrapper)
                 "parameters": FEEDQUERY_PARAMS,
             },
         ]
 
-    
-    def run_turn(self, user_input: str, chat_id: str) -> str:
-        conv_id = self.conversations.get(chat_id)
+    @require_subscription
+    def run_turn(self, user_input: str, user_id: str, chat_id: str) -> str:
+        conv_id = None
+
+        if self.redis:
+            try:
+                session_data_raw = self.redis.get(f"session:{chat_id}")
+                if session_data_raw:
+                    session_data = json.loads(session_data_raw)
+                    conv_id = session_data.get("conversation_id")
+                    self.last_response_id[chat_id] = session_data.get("last_response_id")
+            except Exception as e:
+                logger.exception(f"Redis failed to retrieve session data for {chat_id}: {e}")
+        else:
+            conv_id = self.conversations.get(chat_id)
 
         # ---------- First request (user message) ----------
         create_args = dict(
@@ -245,6 +210,16 @@ class ChatbotCore:
         if not getattr(resp, "id", None):
             return "Error: server didn’t return a response id."
         self.last_response_id[chat_id] = resp.id
+
+        if self.redis:
+            try:
+                session_data = {
+                    "conversation_id": self.conversations.get(chat_id),
+                    "last_response_id": self.last_response_id.get(chat_id)
+                }
+                self.redis.set(f"session:{chat_id}", json.dumps(session_data), ex=86400)
+            except Exception as e:
+                logger.exception(f"Redis failed to save session data for {chat_id}: {e}")
 
         # ---------- Tool loop ----------
         tool_calls = self.collect_tool_calls(resp)
@@ -412,6 +387,15 @@ class ChatbotCore:
 
             if getattr(follow, "id", None):
                 self.last_response_id[chat_id] = follow.id
+                if self.redis:
+                    try:
+                        session_data = {
+                            "conversation_id": self.conversations.get(chat_id),
+                            "last_response_id": self.last_response_id.get(chat_id)
+                        }
+                        self.redis.set(f"session:{chat_id}", json.dumps(session_data), ex=86400)
+                    except Exception as e:
+                        logger.exception(f"Redis failed to save session data for {chat_id}: {e}")
             resp = follow
             tool_calls = self.collect_tool_calls(resp)
 
@@ -673,7 +657,7 @@ class ChatbotCore:
                     return {"call_id": call_id, "output": self.pack_json(out)}
 
                 # Fallback: fetch then slice (works today; swap to native when ready)
-                eos = feed.get_odds(q) or []
+                eos = feed.get_odds_cached(q) or []
                 items, next_cur = self._slice_with_cursor([eo.model_dump() for eo in eos], limit, state)
                 return {"call_id": call_id, "output": self.pack_json(self._page_dict(items, next_cur))}
 
@@ -687,7 +671,7 @@ class ChatbotCore:
                     out = self._page_dict([e.model_dump() for e in (rows or [])], self._b64e(next_state) if next_state else None)
                     return {"call_id": call_id, "output": self.pack_json(out)}
 
-                events = feed.get_events(q) or []
+                events = feed.get_events_cached(q) or []
                 items, next_cur = self._slice_with_cursor([e.model_dump() for e in events], limit, state)
                 return {"call_id": call_id, "output": self.pack_json(self._page_dict(items, next_cur))}
 
@@ -713,7 +697,7 @@ class ChatbotCore:
                     return {"call_id": call_id, "output": self.pack_json(out)}
 
                 # Fallback: paginate a large odds object by its list fields (e.g., prices)
-                eo = feed.get_event_odds(event, q)
+                eo = feed.get_event_odds_cached(event, q)
                 d = eo.model_dump()
 
                 # Try the common large fields in order; first one found gets paginated.
@@ -764,7 +748,7 @@ class ChatbotCore:
         # simplest: try by id
         try:
             q = FeedQuery(event_ids=[ev["event_id"]], limit=1)
-            found = self.main_feed.get_events(q) or []
+            found = self.main_feed.get_events_cached(q) or []
             if found:
                 return found[0]
         except Exception:
@@ -849,11 +833,36 @@ class ChatbotCore:
     # Messaging platform integration
     # ------------------------------------------------------------------
     
-
-    @require_subscription
     async def _handle_message(self, update, context) -> None:
         """Handle general messages."""
         text = update.message.text.strip() or ""
         chat_id = str(update.effective_chat.id)
-        answer = self.run_turn(text, chat_id=chat_id)
-        await self.platform.send_message(update.effective_chat.id, answer)
+        db = next(get_db_session())
+        user = None
+        try:
+            # This logic finds the user based on their platform ID (e.g., phone)
+            standardized_phone = standardize_phone_number(chat_id)
+            user = db.query(User).filter(User.phone == standardized_phone).first()
+            print(f"Found user: {user}")
+        finally:
+            print("Closing DB session")
+            db.close()
+        print(user)
+        if not user:
+            logger.warning(f"Could not find user")
+            await self.platform.send_message(chat_id, f"Sorry, I couldn't identify your account. Purchase a subscription here: {self.payment_url}")
+            return
+        user_id = str(user.id)
+        try:
+            answer = self.run_turn(text, user_id=user_id, chat_id=chat_id)
+            await self.platform.send_message(chat_id, answer)
+        except SubscriptionError as e:
+            logger.info(f"Subscription error for user {user_id}: {e}")
+            subscribe_message = (
+                "It looks like your subscription has expired or is inactive. "
+                f"Please renew or subscribe here: {self.payment_url}"
+            )
+            await self.platform.send_message(chat_id, subscribe_message)
+        except Exception as e:
+            logger.exception(f"Error processing message from user {user_id}: {e}")
+            await self.platform.send_message(chat_id, "Sorry, something went wrong while processing your request.")

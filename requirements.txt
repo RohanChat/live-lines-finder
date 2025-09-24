@@ -25,3 +25,5 @@ python-dotenv
 pydantic
 orjson
 redis
+fastapi
+uvicorn[standard]

@@ -28,7 +28,9 @@ class Config:
     UNABATED_REALTIME_API_REGION = os.getenv('UNABATED_REALTIME_API_REGION')
     UNABATED_DATA_API_URL = os.getenv('UNABATED_DATA_API_URL')
     MOCK_CHAT_ID = os.getenv('MOCK_CHAT_ID')  # Default mock chat ID
-    ACTIVE_ODDS_PROVIDERS = ["unabated", "theoddsapi"]
+    ACTIVE_ODDS_PROVIDERS = ["theoddsapi"]
+    REDIS_URL = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
+    WEB_APP_API_KEY = os.getenv('WEB_APP_API_KEY')  # Default API key for web app
     
     # Stripe Configuration
     STRIPE_SECRET_KEY_LIVE = os.getenv('STRIPE_SECRET_KEY_LIVE')
@@ -41,9 +43,15 @@ class Config:
     SYSTEM_PROMPT = os.getenv('SYSTEM_PROMPT', 'You are a helpful sports betting assistant.')
 
     # keys for the different products and their product ids from stripe
-    PRODUCT_IDS = {
+    PRODUCTS = {
         'betting_assistant': {
-            'live': os.getenv('BETTING_ASSISTANT_STRIPE_PRODUCT_ID'),
-            'test': os.getenv('TEST_PRODUCT_ID')  # Default test product ID
+            'live': {
+                'product_id': os.getenv('BETTING_ASSISTANT_STRIPE_PRODUCT_ID'),
+                'payment_url': os.getenv('BETTING_ASSISTANT_STRIPE_PAYMENT_URL_LIVE')
+            },
+            'test': {
+                'product_id': os.getenv('TEST_PRODUCT_ID'),
+                'payment_url': os.getenv('TEST_PRODUCT_PAYMENT_URL')
+            }
         }
     }
