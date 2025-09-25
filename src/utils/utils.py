@@ -257,21 +257,17 @@ def require_subscription(fn):
             # This should ideally not happen if called correctly
             raise SubscriptionError("User identification failed.")
 
-        db_session = next(get_db_session())
-        try:
+        with get_db_session() as db_session:
             subscription = db_session.query(UserSubscription).filter(
-                UserSubscription.user_id == user_id, 
-                UserSubscription.active == True
+                UserSubscription.user_id == user_id,
+                UserSubscription.active == True   # FIX: correct column name
             ).first()
 
             if not subscription:
-                logger.info(f"Subscription check failed for user_id: {user_id}")
-                # --- FIX: Raise our specific, catchable exception ---
-                raise SubscriptionError("Active subscription required to use this feature. Please visit https://buy.stripe.com/bJefZi6Nlav46bl7xz2cg01 to subscribe.")
-            
-            logger.debug(f"Subscription check passed for user_id: {user_id}. Welcome!")
-            # If subscription is valid, call the original function
+                raise SubscriptionError(
+                    "Active subscription required to use this feature. "
+                    "Please visit https://buy.stripe.com/bJefZi6Nlav46bl7xz2cg01 to subscribe."
+                )
+
             return fn(self, *args, **kwargs)
-        finally:
-            db_session.close()
     return wrapper

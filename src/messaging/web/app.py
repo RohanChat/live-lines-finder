@@ -92,8 +92,16 @@ async def get_session_data(request: Request, session_id: str) -> dict:
     if not user_data_raw:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired session token.")
     
-    # The data is stored as a simple string: "user_id|phone_number"
-    user_id, phone_number = user_data_raw.decode('utf-8').split('|', 1)
+    if isinstance(user_data_raw, bytes):
+        line = user_data_raw.decode("utf-8", errors="replace")
+    else:
+        line = user_data_raw  # already a str
+
+    try:
+        user_id, phone_number = line.split("|", 1)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Corrupted session data.")
+    
     return {"user_id": user_id, "phone_number": phone_number}
 
 
