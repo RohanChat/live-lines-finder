@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any, Dict
 
-from feeds.base import OddsFeed
+from src.feeds.base import OddsFeed
 
 class AnalysisEngine(ABC):
     """Abstract base class for modules that analyse odds data."""
@@ -12,6 +12,6 @@ class AnalysisEngine(ABC):
         self.feed = feed
 
     @abstractmethod
-    def process_event(self, event: Dict[str, Any], *args, **kwargs):
+    def process_odds_for_event(self, event, *args, **kwargs):
         """Analyse odds data for the given event."""
         raise NotImplementedError

@@ -9,14 +9,15 @@ from scipy.interpolate import PchipInterpolator
 from scipy.stats import norm
 from scipy.optimize import minimize
 
-from utils.file_utils import load_file_with_string
-from config import Config
+from src.utils.file_utils import load_file_with_string
+from config.config import Config
 from itertools import zip_longest   # handles uneven list lengths
 from collections.abc import Iterable
 from itertools import product
-from feeds.base import OddsFeed
-from feeds.the_odds_api import TheOddsAPI
+from src.feeds.base import OddsFeed
+from src.feeds.api.the_odds_api import TheOddsApiAdapter as TheOddsAPI
 from .base import AnalysisEngine
+from utils.utils import implied_probability, american_to_decimal, decimal_to_american
 
 class OddsProcessor(AnalysisEngine):
     """Process and plot prop markets for an event"""
@@ -206,25 +207,6 @@ class OddsProcessor(AnalysisEngine):
                 pass
         # If not iterable, wrap it in a list.
         return [value]
-
-    def implied_probability(self, decimal_odds):
-        """Convert Decimal odds to implied probability."""
-        return 1 / decimal_odds
-
-    def american_to_decimal(self, american_odds):
-        """Convert American odds to Decimal odds."""
-        if american_odds < 0:
-            return (100 / abs(american_odds)) + 1
-        else:
-            return (american_odds / 100) + 1
-        
-    def decimal_to_american(self, decimal_odds):
-        if decimal_odds >= 2:
-            # For positive odds: (d - 1) * 100
-            return (decimal_odds - 1) * 100
-        else:
-            # For negative odds: -100 / (d - 1)
-            return -100 / (decimal_odds - 1)
 
     def calculate_vig_for_row(self, row, mode="under_over"):
         if mode == "under_over":
@@ -1140,7 +1122,7 @@ class OddsProcessor(AnalysisEngine):
     def process_odds_for_event(
         self, event, 
         p_gap, ev_thresh, bootstrap=False, arb_thresh=0.01,
-        player=True, game=False, regions=Config.US, 
+        player=True, game=False, 
         mode="live", filepath="odds_data", verbose=False
         ):
         
@@ -1160,8 +1142,8 @@ class OddsProcessor(AnalysisEngine):
                 print("\n")
 
             if mode == "live":
-                player_prop_df = self.feed.get_props_for_todays_events([event], markets=Config.player_prop_markets)
-                player_alt_df = self.feed.get_props_for_todays_events([event], markets=Config.player_alternate_markets)
+                player_prop_df = self.feed.get_props_for_todays_events([event], markets=self.feed.player_prop_markets)
+                player_alt_df = self.feed.get_props_for_todays_events([event], markets=self.feed.player_alternate_markets)
                 player_prop_df = pd.DataFrame(player_prop_df)
                 player_alt_df = pd.DataFrame(player_alt_df)
                 if not os.path.exists(f"{filepath}/player"):
@@ -1261,9 +1243,9 @@ class OddsProcessor(AnalysisEngine):
                 print("\n")
             
             if mode == "live":
-                game_period_df = self.feed.get_props_for_todays_events([event], markets=Config.game_period_markets)
-                alternate_df = self.feed.get_props_for_todays_events([event], markets=Config.alt_markets)
-                game_df = self.feed.get_props_for_todays_events([event], markets=Config.game_markets)
+                game_period_df = self.feed.get_props_for_todays_events([event], markets=self.feed.game_period_markets)
+                alternate_df = self.feed.get_props_for_todays_events([event], markets=self.feed.alt_markets)
+                game_df = self.feed.get_props_for_todays_events([event], markets=self.feed.game_markets)
                 game_period_df = pd.DataFrame(game_period_df)
                 alternate_df = pd.DataFrame(alternate_df)
                 game_df = pd.DataFrame(game_df)

@@ -6,20 +6,16 @@ class BaseMessagingClient(ABC):
     """Abstract interface for messaging backends."""
 
     @abstractmethod
-    async def send_message(self, chat_id: Any, text: str, **kwargs) -> None:
-        """Send a message to the given chat/user."""
+    def register_message_handler(self, command: str, handler: Callable) -> None:
+        """Register a message handler for the given command."""
 
     @abstractmethod
     def register_command_handler(self, command: str, handler: Callable) -> None:
-        """Register a function for a command."""
+        """Register a command handler for the given command."""
 
     @abstractmethod
-    def register_message_handler(self, filter_obj: Any, handler: Callable) -> None:
-        """Register a general message handler."""
-
-    @abstractmethod
-    def register_callback_query_handler(self, handler: Callable) -> None:
-        """Register a callback query handler."""
+    async def send_message(self, chat_id: Any, text: str, **kwargs) -> None:
+        """Send a message to the given chat/user."""
 
     @abstractmethod
     def start(self) -> None:

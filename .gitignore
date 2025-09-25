@@ -8,3 +8,15 @@ __pycache__/
 *.pyc
 *.DS_Store
 supabase/
+*.db
+*.sqlite3
+mappings/
+.vscode/
+tests/
+old/
+config/*.json
+*.log
+logs/
+scripts/
+config/prompts/
+*.bak

@@ -1,12 +1,12 @@
 import stripe
 import logging
-from config import Config
+from config.config import Config
 from datetime import datetime
-from utils.phone_utils import standardize_phone_number, get_phone_variations
+from src.utils.utils import standardize_phone_number, get_phone_variations
 
 logger = logging.getLogger(__name__)
 
-stripe.api_key = Config.STRIPE_SECRET_KEY
+stripe.api_key = Config.STRIPE_SECRET_KEY_LIVE
 
 class StripeService:
     @staticmethod

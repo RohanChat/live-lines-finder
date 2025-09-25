@@ -17,10 +17,10 @@ from telegram.ext import (
 )
 from sqlalchemy.exc import SQLAlchemyError
 
-from ...config import Config
-from ...database import get_db_session, User, init_db
-from ...stripe_service import StripeService
-from ...utils.phone_utils import standardize_phone_number
+from config.config import Config
+from src.database import get_db_session, User, init_db
+from src.utils.stripe_service import StripeService
+from src.utils.phone_utils import standardize_phone_number
 from ..base import BaseMessagingClient
 
 
@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 class TelegramBot(BaseMessagingClient):
     def __init__(self, token: str):
         self.application = ApplicationBuilder().token(token).build()
+        self.chat_id = Config.TELEGRAM_CHAT_ID
 
     async def send_message(self, chat_id, text: str, **kwargs):
         await self.application.bot.send_message(chat_id=chat_id, text=text, **kwargs)
@@ -41,15 +42,8 @@ class TelegramBot(BaseMessagingClient):
     def register_command_handler(self, command: str, handler):
         self.application.add_handler(CommandHandler(command, handler))
 
-    def register_message_handler(self, filter_obj, handler):
-        self.application.add_handler(MessageHandler(filter_obj, handler))
-
-    def register_callback_query_handler(self, handler):
-        self.application.add_handler(CallbackQueryHandler(handler))
-
     def start(self):
         self.application.run_polling(allowed_updates=Update.ALL_TYPES)
-
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles the /start command with phone number verification."""

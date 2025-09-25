@@ -1,63 +1,95 @@
-# live-lines-finder
-Live arbitrage and mispriced lines identifier
+# Live Lines Finder
 
-## Bot Setup and Configuration
+A subscription-gated, multi-platform chatbot providing sports betting analysis. The core logic is platform-agnostic and designed to be easily extended to new messaging platforms.
 
-This section details how to set up and configure the Telegram bot associated with this project.
+## Features
 
-### Database Configuration
+- **Multi-Platform:** Supports Telegram, iMessage, a mock command-line interface for testing, and can be extended to other platforms.
+- **Subscription Gating:** Access is controlled by checking for an active user subscription against a specific product ID in the database.
+- **Configurable Modes:** Run in `live` or `test` modes to connect to different backend services or configurations.
+- **Decoupled Architecture:** The central chatbot logic is completely separate from the platform-specific messaging clients.
 
-The application uses SQLAlchemy to connect to a database for storing user information, primarily their `chat_id` and `phone_number`.
+## Project Structure
 
--   **Default Behavior:** By default, if no specific configuration is provided, the application will use a local SQLite database. A file named `telegram_users.db` will be automatically created in the project's root directory when the bot first needs to access the database.
--   **Using PostgreSQL (Recommended for Production):** For more robust and scalable deployments (e.g., using services like Supabase, Heroku Postgres, or any other PostgreSQL instance), you can configure the bot to use a PostgreSQL database.
-    -   To do this, you must set the `DATABASE_URL` environment variable.
-    -   The format for the `DATABASE_URL` is `postgresql://username:password@host:port/database_name`.
-    -   **Example:** `DATABASE_URL=postgresql://user:strongpassword@db.example.com:5432/mydatabase`
--   **Database Driver:** Ensure you have the necessary database driver installed. For PostgreSQL, this is `psycopg2-binary`, which is included in the `requirements.txt` file.
+Key files and directories in the project:
 
-### Running the Telegram Bot
+```
+.
+├── src
+│   ├── chatbot/core.py         # Core chatbot logic & subscription decorator
+│   ├── database/models.py      # SQLAlchemy database models (User, Product, Subscription)
+│   ├── database/session.py     # Database session management and initialization
+│   ├── feeds/                  # folder with the different odds feeds that we can / will use
+│   ├── analysis/               # folder containing the analysis engines that process and analyse odds data 
+│   ├── messaging/              # Platform-specific messaging clients
+│   │   ├── base.py             # Abstract base class for all clients
+│   │   ├── mock_client/        # Mock CLI client for local testing
+│   │   └── telegram/           # Telegram bot client
+│   │   └── imessage/           # iMessage bot client
+│   ├── config.py               # Environment variable configuration
+│   └── run_chatbot.py          # Main entry point to run the application
+├── .env.example                # Example environment variables
+└── requirements.txt            # Python dependencies
+```
 
-The core logic for the Telegram bot resides in `src/messaging/telegram/bot.py`.
+## Setup and Installation
 
-1.  **Set Environment Variables:**
-    *   `TELEGRAM_BOT_TOKEN`: This is essential. You must obtain this token from BotFather on Telegram.
-        Example: `TELEGRAM_BOT_TOKEN='123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11'`
-    *   `DATABASE_URL`: (Optional, see Database Configuration above). If not set, SQLite will be used.
-    *   Other environment variables like `ODDS_API_KEY` might be needed for full application functionality but are not strictly required just to run the bot for user registration. These are typically defined in a `.env` file which is loaded by the application (see `src/config.py`).
+1.  **Clone the Repository**
+    ```bash
+    git clone <your-repo-url>
+    cd live-lines-finder
+    ```
 
-2.  **Install Dependencies:**
+2.  **Create a Virtual Environment**
+    ```bash
+    python -m venv venv
+    source venv/bin/activate
+    ```
+
+3.  **Install Dependencies**
     ```bash
     pip install -r requirements.txt
     ```
 
-3.  **Initialize the Database (if needed):**
-    The bot will attempt to create database tables on startup if they don't exist (as defined in `src/database/session.py` via the `init_db()` function). For a new setup, this should happen automatically.
+4.  **Configure Environment Variables**
+    Create a `.env` file in the project root.
 
-4.  **Run the Bot:**
-    Execute the bot script from the project's root directory:
-    ```bash
-    python src/messaging/telegram/bot.py
-    ```
-    You should see log messages indicating that the bot is initializing and then polling for updates from Telegram.
+    -   `DATABASE_URL`: The connection string for your database which stores user data. Defaults to a local SQLite database (`chatbot.db`) if not set.
+        -   *Example for PostgreSQL:* `postgresql://user:pass@host:port/dbname`
+    -   `TELEGRAM_BOT_TOKEN`: Required to run the Telegram platform.
+    -   `OPENAI_API_KEY`: Required for the chatbot's NLP capabilities.
+    -   `PRODUCT_ID_LIVE` / `PRODUCT_ID_TEST`: The stripe product IDs used for subscription checks in different modes.
 
-### User Interaction Flow
+## Running the Chatbot
 
-The interaction between a user and the bot is designed to be simple and facilitate notifications:
+The application is launched using `src/run_chatbot.py`, which handles database initialization and starts the selected messaging client.
 
-1.  **Initiation (`/start` command):**
-    -   A new user messages the bot and sends the `/start` command.
-    -   The bot registers the user's unique `chat_id`.
+**Command-Line Arguments:**
 
-2.  **Contact Sharing Prompt:**
-    -   Upon receiving the `/start` command, the bot replies with a welcome message and prompts the user to share their contact information. This is done via a special Telegram button that requests contact sharing permission.
+-   `--platform`: Choose the messaging client.
+    -   `mock`: An interactive command-line interface for testing.
+    -   `telegram`: The live Telegram bot.
+    -   `imessage`: The live iMessage bot
+-   `--mode`: Set the operating mode.
+    -   `test`: Uses test configurations (e.g., `PRODUCT_ID_TEST`).
+    -   `live`: Uses live, production-ready configurations.
+-   `--chat_id` (Optional): Specify a `chat_id` when using the `mock` platform to simulate messages from a specific user.
 
-3.  **Storing Phone Number:**
-    -   If the user accepts and shares their contact, the bot receives their phone number.
-    -   This phone number is then stored in the database, associated with their `chat_id`.
+### Examples
 
-4.  **Notification Eligibility:**
-    -   Once a user has shared their contact (and thus has a phone number stored), they become eligible to receive notifications sent by the system.
-    -   The `TelegramNotifier` component (in `src/notifier.py`) is responsible for sending messages. It queries the database for all users who have provided a phone number and sends the notification to their respective `chat_id`. Users who have not shared their contact will not receive these notifications.
+**Run the Mock CLI for a specific user:**
+```bash
+python src/run_chatbot.py --platform mock --chat_id '+1234567890'
+```
 
-This setup allows users to opt-in to notifications by providing their contact details, ensuring they consent to being messaged by the bot.
+**Run the Bot in Live Mode:**
+```bash
+python src/run_chatbot.py --platform imessage --mode live
+python src/run_chatbot.py --platform telegram --mode live
+```
+
+**Future developments:**
+ - Live websocket odds feeds to reduce latency and lag during live betting
+ - SGP construction
+ - Sports data MCP implementation for historical and live data, to enhance the model's capabilities
+ - Buildilng advanced analysis engines for the model's toolkit

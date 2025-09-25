@@ -1,33 +1,52 @@
 from __future__ import annotations
-
 from abc import ABC, abstractmethod
-from typing import Iterable, List, Dict, Any
+from typing import List, Optional, Union
+
+from src.utils.utils import redis_cache
+from .models import Period, Region, SportKey, MarketType, Event, EventOdds, Bookmaker, Competitor, Market
+from .query import FeedQuery
 
 class OddsFeed(ABC):
-    """Interface for classes providing odds and event data."""
+    """Snapshot/REST-style interface."""
 
     @abstractmethod
-    def get_todays_events(self, commence_time_from: str, commence_time_to: str) -> List[Dict[str, Any]]:
-        """Return events scheduled between the provided times."""
-        raise NotImplementedError
+    def provider_key(self, key: Union[SportKey, Period, MarketType, Market, Region]) -> str: ...
+
+    # capabilities
+    @abstractmethod
+    def list_sports(self) -> List[SportKey]: ...
+    @abstractmethod
+    def list_bookmakers(self) -> List[Bookmaker]: ...
+    @abstractmethod
+    def list_markets(self, sport: Optional[SportKey] = None) -> List[MarketType]: ...
 
     @abstractmethod
-    def get_events_between_hours(self, prev_hours: int = 6, next_hours: int = 24) -> List[Dict[str, Any]]:
-        """Return events occurring between the hour range around now."""
-        raise NotImplementedError
+    def get_events(self, q: FeedQuery) -> List[Event]: ...
+    @redis_cache(prefix="feed:get_events", ttl=200)
+    def get_events_cached(self, q: FeedQuery) -> List[Event]:
+        events = self.get_events(q)
+        return events
 
     @abstractmethod
-    def get_events_in_next_hours(self, hours: int = 24) -> List[Dict[str, Any]]:
-        """Return events occurring within the next ``hours`` hours."""
-        raise NotImplementedError
+    def get_event_odds(self, event: Event, q: FeedQuery) -> EventOdds: ...
+    @redis_cache(prefix="feed:get_event_odds", ttl=200)
+    def get_event_odds_cached(self, event: Event, q: FeedQuery) -> EventOdds:
+        event_odds = self.get_event_odds(event, q)
+        return event_odds
 
     @abstractmethod
-    def get_props_for_todays_events(self, events: Iterable[Dict[str, Any]], markets: str, regions: str) -> List[Dict[str, Any]]:
-        """Return prop odds for the given events."""
-        raise NotImplementedError
+    def get_odds(self, q: FeedQuery) -> List[EventOdds]: ...
+    @redis_cache(prefix="feed:get_odds", ttl=200)
+    def get_odds_cached(self, q: FeedQuery) -> List[EventOdds]:
+        event_odds_list = self.get_odds(q)
+        return event_odds_list
 
     @abstractmethod
-    def get_game_odds(self, markets: str, regions: str) -> List[Dict[str, Any]]:
-        """Return game odds for the configured sport."""
-        raise NotImplementedError
+    def _normalize_event(self, raw) -> Event: ...
+    @abstractmethod
+    def _normalize_event_odds(self, event: Event, raw_odds) -> EventOdds: ...
 
+class SgpSupport:
+    def supports_sgp(self) -> bool: return False
+    def price_sgp(self, req): raise NotImplementedError
+    def deeplink_sgp(self, req): raise NotImplementedError
