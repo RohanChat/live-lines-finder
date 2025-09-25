@@ -1,7 +1,8 @@
 from __future__ import annotations
+from contextlib import asynccontextmanager
 import logging
 import secrets
-from fastapi import FastAPI, Depends, HTTPException, status, Security
+from fastapi import FastAPI, Depends, HTTPException, status, Security, Request
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -9,7 +10,7 @@ from sqlalchemy.orm import Session
 from config.config import Config
 from src.chatbot.factory import create_chatbot
 from src.database.models import User, UserSubscription
-from src.database.session import get_db_session
+from src.database.session import get_db, get_db_session, init_db
 from src.utils.utils import init_logging, standardize_phone_number, SubscriptionError
 
 # --- 1. Initialization ---
@@ -17,12 +18,33 @@ from src.utils.utils import init_logging, standardize_phone_number, Subscription
 init_logging()
 logger = logging.getLogger(__name__)
 
-# Use the factory to create a "headless" chatbot instance.
-# The factory handles loading config, feeds, etc.
-# We only need the core, not the messaging client (which is None for 'web').
-chatbot_core, _ = create_chatbot(platform_name="web", mode="prod")
-if not chatbot_core.redis:
-    raise RuntimeError("Redis client is not available. The web API requires Redis for session management.")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Handles application startup and shutdown events.
+    Initializes all necessary resources like database and chatbot core.
+    """
+    logger.info("--- Application starting up ---")
+    
+    init_db(Config.DATABASE_URL)
+    
+    chatbot_core, _ = create_chatbot(platform_name="web", mode="prod")
+    if not chatbot_core:
+        raise RuntimeError("Fatal: Failed to create chatbot core.")
+    app.state.chatbot_core = chatbot_core
+    
+    logger.info("--- Application startup complete. Ready to accept requests. ---")
+    
+    yield 
+    
+    logger.info("--- Application shutting down ---")
+
+# # Use the factory to create a "headless" chatbot instance.
+# # The factory handles loading config, feeds, etc.
+# # We only need the core, not the messaging client (which is None for 'web').
+# chatbot_core, _ = create_chatbot(platform_name="web", mode="prod")
+# if not chatbot_core.redis:
+#     raise RuntimeError("Redis client is not available. The web API requires Redis for session management.")
 
 
 # --- 2. API Data Models ---
@@ -58,11 +80,12 @@ async def get_api_key(api_key: str = Security(api_key_header)):
     else:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid API Key.")
 
-async def get_session_data(session_id: str) -> dict:
+async def get_session_data(request: Request, session_id: str) -> dict:
     """
     Dependency to validate a session_id and retrieve user data from Redis.
     This acts as our user authentication for the /chat endpoint.
     """
+    chatbot_core = request.app.state.chatbot_core
     session_key = f"web_session:{session_id}"
     user_data_raw = chatbot_core.redis.get(session_key)
     
@@ -79,6 +102,7 @@ app = FastAPI(
     title="Betting Assistant API",
     description="A secure API to interact with the Betting Assistant chatbot.",
     version="1.0.0",
+    lifespan=lifespan
 )
 
 @app.get("/health", status_code=status.HTTP_200_OK, tags=["System"])
@@ -87,46 +111,42 @@ async def health_check():
     return {"status": "ok"}
 
 @app.post("/auth/login", response_model=LoginResponse, dependencies=[Depends(get_api_key)], tags=["Authentication"])
-async def login_with_phone(request: PhoneLoginRequest, db: Session = Depends(get_db_session)):
+async def login_with_phone(api_request: Request, request: PhoneLoginRequest, db: Session = Depends(get_db)):
     """
     Authenticates a user via their phone number.
     On success, it creates a session and returns a temporary session_id token.
     """
-    try:
-        phone = standardize_phone_number(request.phone_number)
-        user = db.query(User).filter(User.phone == phone).first()
+    chatbot_core = api_request.app.state.chatbot_core
+    phone = standardize_phone_number(request.phone_number)
+    user = db.query(User).filter(User.phone == phone).first()
 
-        if not user:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User with this phone number not found.")
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User with this phone number not found.")
 
-        active_subscription = db.query(UserSubscription).filter(UserSubscription.user_id == user.id, UserSubscription.active == True).first()
-        if not active_subscription:
-            raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=f"No active subscription found for this user. Visit {chatbot_core.payment_url} to subscribe.")
+    active_subscription = db.query(UserSubscription).filter(UserSubscription.user_id == user.id, UserSubscription.active == True).first()
+    if not active_subscription:
+        raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=f"No active subscription found for this user. Visit {chatbot_core.payment_url} to subscribe.")
 
-        session_id = f"sess_{secrets.token_hex(24)}"
-        session_key = f"web_session:{session_id}"
-        session_value = f"{user.id}|{phone}" # Store both user_id and phone, separated by a pipe.
+    session_id = f"sess_{secrets.token_hex(24)}"
+    session_key = f"web_session:{session_id}"
+    session_value = f"{user.id}|{phone}" # Store both user_id and phone, separated by a pipe.
 
-        # Store the session in Redis with a 24-hour expiry.
-        chatbot_core.redis.set(session_key, session_value, ex=86400)
+    # Store the session in Redis with a 24-hour expiry.
+    chatbot_core.redis.set(session_key, session_value, ex=86400)
         
-        return LoginResponse(session_id=session_id)
-    finally:
-        db.close()
+    return LoginResponse(session_id=session_id)
 
 @app.post("/message", response_model=ChatResponse, dependencies=[Depends(get_api_key)], tags=["Chat"])
-async def handle_chat(request: ChatRequest, session: dict = Depends(get_session_data)):
+async def handle_chat(api_request: Request, request: ChatRequest, session: dict = Depends(get_session_data)):
     """
     Handles a user's message. Requires a valid session_id from /auth/login.
     """
+    chatbot_core = api_request.app.state.chatbot_core
     user_id = session["user_id"]
-    phone_number = session["phone_number"] # This is the 'chat_id' your core logic expects for Redis history.
+    phone_number = session["phone_number"]
 
     try:
         logger.info(f"Processing chat for user_id: {user_id}")
-        
-        # Call the core logic, providing both the stable user_id (for subscription check)
-        # and the phone_number (as chat_id, for conversation history caching).
         answer = chatbot_core.run_turn(
             user_input=request.user_input, 
             user_id=user_id, 

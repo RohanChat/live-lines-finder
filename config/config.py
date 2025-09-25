@@ -3,6 +3,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 load_dotenv()
 
+BASE_DIR = Path(__file__).resolve().parent.parent
+
 class Config:
     """Configuration class for the application."""
 
@@ -10,7 +12,8 @@ class Config:
     DATABASE_URL = os.getenv('DATABASE_URL_POSTGRES', LOCAL_DATABASE_URL)
     ODDS_API_KEY = os.getenv('ODDS_API_KEY')
     ODDS_API_URL = os.getenv('ODDS_API_URL')
-    TOA_MAPPING_PATH = Path(os.getenv('TOA_MAPPING_PATH', './config/mappings/theoddsapi_mappings.json'))
+    _toa_mapping_path_str = os.getenv('TOA_MAPPING_PATH')
+    TOA_MAPPING_PATH = (BASE_DIR / _toa_mapping_path_str.strip("'\"")) if _toa_mapping_path_str else None
     with open(TOA_MAPPING_PATH, 'r') as f:
         TOA_MAPPING = json.load(f)
     TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
@@ -41,9 +44,14 @@ class Config:
     STRIPE_SUBSCRIPTION_PRICE_ID = os.getenv('STRIPE_SUBSCRIPTION_PRICE_ID')
 
     # Path to the system prompt text file
-    SYSTEM_PROMPT_PATH = os.getenv('SYSTEM_PROMPT_PATH', './config/prompts/system_prompt.txt')
-    with open(SYSTEM_PROMPT_PATH, 'r') as f:
-        SYSTEM_PROMPT = f.read()
+    _system_prompt_path_str = os.getenv('SYSTEM_PROMPT_PATH')
+    SYSTEM_PROMPT_PATH = (BASE_DIR / _system_prompt_path_str.strip("'\"")) if _system_prompt_path_str else None
+    if SYSTEM_PROMPT_PATH and SYSTEM_PROMPT_PATH.exists():
+        with open(SYSTEM_PROMPT_PATH, 'r') as f:
+            SYSTEM_PROMPT = f.read()
+    else:
+        # This warning helps debug path issues.
+        print(f"WARNING: System prompt file not found or path not set. Looked at: {SYSTEM_PROMPT_PATH}")
         
     # keys for the different products and their product ids from stripe
     PRODUCTS = {

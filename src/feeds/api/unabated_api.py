@@ -50,6 +50,9 @@ class UnabatedApiAdapter(OddsFeed):
             MarketType.PLAYER_PROPS: "props"
         }
 
+    def provider_key(self, key: Any) -> str:
+        raise NotImplementedError("UnabatedApiAdapter does not implement provider_key yet")
+
     def _load_mappings(self):
         """Load clean mappings from real API metadata"""
         try:
