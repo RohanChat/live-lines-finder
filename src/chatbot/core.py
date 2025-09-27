@@ -149,7 +149,6 @@ class ChatbotCore:
             },
         ]
 
-    @require_subscription
     def run_turn(self, user_input: str, user_id: str, chat_id: str) -> str:
         conv_id = None
 
@@ -838,6 +837,7 @@ class ChatbotCore:
         text = update.message.text.strip() or ""
         chat_id = str(update.effective_chat.id)
         user = None
+
         with get_db_session() as db:
             standardized_phone = standardize_phone_number(chat_id)
             user = db.query(User).filter(User.phone == standardized_phone).first()
@@ -852,6 +852,9 @@ class ChatbotCore:
             await self.platform.send_message(chat_id, f"Sorry, I couldn't identify your account. Purchase a subscription here: {self.payment_url}")
             return
         user_id = str(user.id)
+        active_subscription = db.query(UserSubscription).filter(UserSubscription.user_id == user.id, UserSubscription.active == True, UserSubscription.product_id == self.product_id).first()
+        if not active_subscription:
+            raise SubscriptionError(f"User {user_id} does not have an active subscription. Please visit {self.payment_url} to subscribe.")
         try:
             answer = self.run_turn(text, user_id=user_id, chat_id=chat_id)
             await self.platform.send_message(chat_id, answer)
