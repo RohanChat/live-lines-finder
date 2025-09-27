@@ -6,7 +6,7 @@ DOTENV_PATH = os.getenv("DOTENV_PATH")
 if ENV == "local":
     load_dotenv()                       # local only
 elif DOTENV_PATH:                       # prod/staging: secret-mounted .env
-    load_dotenv(dotenv_path=DOTENV_PATH, override=False)
+    load_dotenv(dotenv_path=DOTENV_PATH, override=True)
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 class Config:
