@@ -38,7 +38,7 @@ class Config:
     UNABATED_REALTIME_API_REGION = os.getenv('UNABATED_REALTIME_API_REGION')
     UNABATED_DATA_API_URL = os.getenv('UNABATED_DATA_API_URL')
     MOCK_CHAT_ID = os.getenv('MOCK_CHAT_ID')
-    ACTIVE_ODDS_PROVIDERS = ["unabated", "theoddsapi"]
+    ACTIVE_ODDS_PROVIDERS = ["theoddsapi"]
     REDIS_URL = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
     WEB_APP_API_KEY = os.getenv('WEB_APP_API_KEY')
 
