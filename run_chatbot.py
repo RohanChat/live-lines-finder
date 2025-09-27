@@ -89,7 +89,7 @@ def main():
         print("[ERROR] Platform or mode not configured correctly. Exiting.")
         return
     
-    init_db()  # Ensure database is initialized before starting the chatbot
+    init_db(Config.DATABASE_URL)  # Ensure database is initialized before starting the chatbot
 
     active_feeds = []
     for feed_name in feeds:

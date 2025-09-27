@@ -1,0 +1,25 @@
+.env
+# ignore the odds_data directory
+odds_data/
+src/__pycache__/
+src/utils/__pycache__/
+# Python byte-code
+__pycache__/
+*.pyc
+*.DS_Store
+supabase/
+*.db
+*.sqlite3
+mappings/
+.vscode/
+tests/
+old/
+config/logs/
+config/odds_data/
+*.log
+logs/
+scripts/
+*.bak
+.git
+.gitignore
+.env.*

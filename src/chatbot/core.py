@@ -837,16 +837,15 @@ class ChatbotCore:
         """Handle general messages."""
         text = update.message.text.strip() or ""
         chat_id = str(update.effective_chat.id)
-        db = next(get_db_session())
         user = None
-        try:
-            # This logic finds the user based on their platform ID (e.g., phone)
+        with get_db_session() as db:
             standardized_phone = standardize_phone_number(chat_id)
             user = db.query(User).filter(User.phone == standardized_phone).first()
-            print(f"Found user: {user}")
-        finally:
-            print("Closing DB session")
-            db.close()
+
+        if not user:
+            logger.warning("Could not find user")
+            await self.platform.send_message(chat_id, f"Sorry, I couldn't identify your account. Purchase a subscription here: {self.payment_url}")
+            return
         print(user)
         if not user:
             logger.warning(f"Could not find user")

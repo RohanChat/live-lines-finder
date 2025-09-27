@@ -1,8 +1,12 @@
 import os, json
 from pathlib import Path
 from dotenv import load_dotenv
-load_dotenv()
-
+ENV = os.getenv("ENV", "local")
+DOTENV_PATH = os.getenv("DOTENV_PATH")
+if ENV == "local":
+    load_dotenv()                       # local only
+elif DOTENV_PATH:                       # prod/staging: secret-mounted .env
+    load_dotenv(dotenv_path=DOTENV_PATH, override=False)
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 class Config:
