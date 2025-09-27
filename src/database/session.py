@@ -3,6 +3,7 @@ from typing import Generator
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
 
+from config.config import Config
 from src.database import User
 from .models import Base
 from supabase import create_client

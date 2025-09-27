@@ -1,24 +1,27 @@
 # Use an official, slim Python runtime as a parent image
 FROM python:3.13-slim
 
+# Prevent Python from buffering stdout/stderr
+ENV PYTHONUNBUFFERED=1
+
 # Set the working directory inside the container
 WORKDIR /app
 
 # Copy the requirements file first to leverage Docker's layer caching
-# We will create this file in the next step.
 COPY requirements.txt .
 
 # Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# (optional but helpful: upgrade pip to avoid resolver quirks on 3.13)
+RUN python -m pip install --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
 # Copy the rest of your application's code into the container
-# The .dockerignore file will prevent copying unnecessary files like .venv
+# The .dockerignore file will prevent copying unnecessary files like .venv and .env
 COPY . .
 
-# Expose the port the web app runs on. This doesn't affect other run types.
-EXPOSE 8000
+# Expose (for local clarity only; Cloud Run uses $PORT)
+EXPOSE 8080
 
-# Define the DEFAULT command to run when the container starts.
-# This will be for the web app. We will override this for other platforms.
-# We use 0.0.0.0 to make it accessible from outside the container.
-CMD ["uvicorn", "src.messaging.web.app:app", "--host", "0.0.0.0", "--port", "8000"]
+# IMPORTANT: use shell form so ${PORT} expands from env at runtime
+# Bind to 0.0.0.0 so Cloud Run can reach it
+CMD sh -lc 'uvicorn src.messaging.web.app:app --host 0.0.0.0 --port ${PORT:-8080}'
