@@ -9,7 +9,7 @@ if ENV == "local":
     load_dotenv()  # local only
 elif DOTENV_PATH:
     # prod/staging: secret-mounted .env; let it override if pre-set
-    load_dotenv(dotenv_path=DOTENV_PATH, override=True)
+    load_dotenv(dotenv_path=DOTENV_PATH, override=False)
 
 # Base dir for resolving relative paths
 BASE_DIR = Path(__file__).resolve().parent.parent
