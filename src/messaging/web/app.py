@@ -128,7 +128,7 @@ app = FastAPI(
 # Add CORS middleware to allow requests from the frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://oddsmate.vercel.app"],  # The origin of your frontend app
+    allow_origins=["https://oddsmate.vercel.app", "https://oddsmate.ai", "https://www.oddsmate.ai"],  # The origin of your frontend app
     allow_credentials=True,
     allow_methods=["*"],  # Allows all methods
     allow_headers=["*"],  # Allows all headers

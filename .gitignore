@@ -20,3 +20,4 @@ logs/
 scripts/
 config/prompts/
 *.bak
+src/utils/update_env.sh

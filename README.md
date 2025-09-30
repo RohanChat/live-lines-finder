@@ -88,6 +88,11 @@ python src/run_chatbot.py --platform imessage --mode live
 python src/run_chatbot.py --platform telegram --mode live
 ```
 
+**Updating env variables before new deployment:**
+```bash
+chmod -x src/utils/update_env.sh
+```
+
 **Future developments:**
  - Live websocket odds feeds to reduce latency and lag during live betting
  - SGP construction
