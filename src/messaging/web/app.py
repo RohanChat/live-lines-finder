@@ -5,6 +5,7 @@ import secrets
 from typing import Optional
 
 from fastapi import FastAPI, Depends, HTTPException, status, Security, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -122,6 +123,15 @@ app = FastAPI(
     description="API to interact with the Betting Assistant chatbot.",
     version="1.0.0",
     lifespan=lifespan,
+)
+
+# Add CORS middleware to allow requests from the frontend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["https://oddsmate.vercel.app"],  # The origin of your frontend app
+    allow_credentials=True,
+    allow_methods=["*"],  # Allows all methods
+    allow_headers=["*"],  # Allows all headers
 )
 
 @app.get("/health", status_code=status.HTTP_200_OK, tags=["System"])
